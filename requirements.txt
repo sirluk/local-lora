@@ -1,0 +1,11 @@
+# python 3.12
+# torch
+transformers
+datasets
+evaluate
+accelerate
+scikit-learn
+scipy
+sentencepiece
+protobuf
+safetensors

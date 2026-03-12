@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.cache/
+.ruff_cache/
+.mypy_cache/
+
+# HF / datasets caches (optional)
+hf_cache/
+datasets_cache/
+
+# Outputs
+runs/
+outputs/
+slurm_logs/*
+!slurm_logs/.gitkeep
+wandb/
