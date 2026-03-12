@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import math
 from dataclasses import dataclass
-from typing import Dict, Iterable, Iterator, Tuple
+from typing import Dict, Iterable, Iterator, Literal, Optional, Tuple
 
 import torch
 from torch import nn
+
+
+ScalingMode = Literal["standard", "rs"]
+GroupingMode = Literal["contiguous", "random", "head_aligned"]
 
 
 @dataclass(frozen=True)
@@ -17,8 +23,40 @@ class AdapterParamCounts:
         return self.a + self.b
 
 
+def _compute_scaling(alpha: float, r: int, scaling_mode: ScalingMode) -> float:
+    if scaling_mode == "standard":
+        return float(alpha) / float(r)
+    if scaling_mode == "rs":
+        # Rank-stabilized LoRA scaling (used when comparing different ranks).
+        return float(alpha) / math.sqrt(float(r))
+    raise ValueError(f"Unknown scaling_mode: {scaling_mode!r}")
+
+
+def _make_deterministic_permutation(length: int, *, seed: int, salt: str) -> torch.Tensor:
+    payload = f"{seed}:{salt}:{length}".encode("utf-8")
+    digest = hashlib.sha256(payload).digest()
+    derived = int.from_bytes(digest[:8], "big", signed=False) % (2**63 - 1)
+    gen = torch.Generator()
+    gen.manual_seed(int(derived))
+    return torch.randperm(int(length), generator=gen)
+
+
+def _invert_permutation(perm: torch.Tensor) -> torch.Tensor:
+    inv = torch.empty_like(perm)
+    inv[perm] = torch.arange(int(perm.numel()), dtype=perm.dtype)
+    return inv
+
+
 class LoRALinear(nn.Module):
-    def __init__(self, base_linear: nn.Linear, r: int, alpha: float = 1.0, dropout: float = 0.0) -> None:
+    def __init__(
+        self,
+        base_linear: nn.Linear,
+        r: int,
+        alpha: float = 1.0,
+        dropout: float = 0.0,
+        *,
+        scaling_mode: ScalingMode = "standard",
+    ) -> None:
         super().__init__()
         if not isinstance(base_linear, nn.Linear):
             raise TypeError(f"LoRALinear expects nn.Linear, got {type(base_linear)}")
@@ -28,7 +66,8 @@ class LoRALinear(nn.Module):
         self.base = base_linear
         self.r = int(r)
         self.alpha = float(alpha)
-        self.scaling = self.alpha / float(self.r)
+        self.scaling_mode: ScalingMode = scaling_mode
+        self.scaling = _compute_scaling(alpha=self.alpha, r=self.r, scaling_mode=self.scaling_mode)
         self.dropout = nn.Dropout(p=float(dropout)) if dropout and dropout > 0.0 else nn.Identity()
 
         d_in = base_linear.in_features
@@ -69,6 +108,11 @@ class GroupLocalLoRALinear(nn.Module):
         m: int,
         alpha: float = 1.0,
         dropout: float = 0.0,
+        *,
+        scaling_mode: ScalingMode = "standard",
+        grouping_mode: GroupingMode = "contiguous",
+        perm_seed: Optional[int] = None,
+        perm_group_id: Optional[str] = None,
     ) -> None:
         super().__init__()
         if not isinstance(base_linear, nn.Linear):
@@ -85,11 +129,27 @@ class GroupLocalLoRALinear(nn.Module):
         self.m = int(m)
         self.g = self.r // self.m
         self.alpha = float(alpha)
-        self.scaling = self.alpha / float(self.r)
+        self.scaling_mode: ScalingMode = scaling_mode
+        self.scaling = _compute_scaling(alpha=self.alpha, r=self.r, scaling_mode=self.scaling_mode)
         self.dropout = nn.Dropout(p=float(dropout)) if dropout and dropout > 0.0 else nn.Identity()
+        self.grouping_mode: GroupingMode = grouping_mode
 
         d_in = base_linear.in_features
         d_out = base_linear.out_features
+
+        if self.grouping_mode == "random":
+            if perm_seed is None:
+                raise ValueError("perm_seed must be provided when grouping_mode='random'")
+            if not perm_group_id:
+                raise ValueError("perm_group_id must be provided when grouping_mode='random'")
+            perm_out = _make_deterministic_permutation(d_out, seed=int(perm_seed), salt=f"out:{perm_group_id}")
+            inv_perm_out = _invert_permutation(perm_out)
+        else:
+            perm_out = None
+            inv_perm_out = None
+
+        self.register_buffer("perm_out", perm_out, persistent=False)
+        self.register_buffer("inv_perm_out", inv_perm_out, persistent=False)
 
         if d_out % self.g != 0:
             raise ValueError(f"d_out % g must be 0, got d_out={d_out}, g={self.g} (r={r}, m={m})")
@@ -122,12 +182,100 @@ class GroupLocalLoRALinear(nn.Module):
 
         out_blocks = torch.einsum("...gm,gdm->...gd", z, self.lora_B_grouped)
         delta = out_blocks.reshape(*out_blocks.shape[:-2], self.out_features)
+        if self.inv_perm_out is not None:
+            delta = delta.index_select(-1, self.inv_perm_out)
+        return base_out + (self.scaling * delta)
+
+
+class InputLocalLoRALinear(nn.Module):
+    def __init__(
+        self,
+        base_linear: nn.Linear,
+        r: int,
+        m: int,
+        alpha: float = 1.0,
+        dropout: float = 0.0,
+        *,
+        scaling_mode: ScalingMode = "standard",
+        grouping_mode: GroupingMode = "contiguous",
+        perm_seed: Optional[int] = None,
+        perm_group_id: Optional[str] = None,
+    ) -> None:
+        super().__init__()
+        if not isinstance(base_linear, nn.Linear):
+            raise TypeError(f"InputLocalLoRALinear expects nn.Linear, got {type(base_linear)}")
+        if r <= 0:
+            raise ValueError(f"r must be > 0, got {r}")
+        if m <= 0:
+            raise ValueError(f"m must be > 0, got {m}")
+        if r % m != 0:
+            raise ValueError(f"r % m must be 0, got r={r}, m={m}")
+
+        self.base = base_linear
+        self.r = int(r)
+        self.m = int(m)
+        self.g = self.r // self.m
+        self.alpha = float(alpha)
+        self.scaling_mode: ScalingMode = scaling_mode
+        self.scaling = _compute_scaling(alpha=self.alpha, r=self.r, scaling_mode=self.scaling_mode)
+        self.dropout = nn.Dropout(p=float(dropout)) if dropout and dropout > 0.0 else nn.Identity()
+        self.grouping_mode: GroupingMode = grouping_mode
+
+        d_in = base_linear.in_features
+        d_out = base_linear.out_features
+
+        if d_in % self.g != 0:
+            raise ValueError(f"d_in % g must be 0, got d_in={d_in}, g={self.g} (r={r}, m={m})")
+        self.d_in_block = d_in // self.g
+
+        if self.grouping_mode == "random":
+            if perm_seed is None:
+                raise ValueError("perm_seed must be provided when grouping_mode='random'")
+            if not perm_group_id:
+                raise ValueError("perm_group_id must be provided when grouping_mode='random'")
+            perm_in = _make_deterministic_permutation(d_in, seed=int(perm_seed), salt=f"in:{perm_group_id}")
+        else:
+            perm_in = None
+
+        self.register_buffer("perm_in", perm_in, persistent=False)
+
+        self.lora_A_grouped = nn.Parameter(
+            torch.empty((self.g, self.m, self.d_in_block), dtype=base_linear.weight.dtype)
+        )
+        self.lora_B = nn.Parameter(torch.zeros((d_out, self.r), dtype=base_linear.weight.dtype))
+
+        nn.init.kaiming_uniform_(self.lora_A_grouped, a=5**0.5)
+
+    @property
+    def in_features(self) -> int:
+        return self.base.in_features
+
+    @property
+    def out_features(self) -> int:
+        return self.base.out_features
+
+    def adapter_param_counts(self) -> AdapterParamCounts:
+        a = self.lora_A_grouped.numel()
+        b = self.lora_B.numel()
+        return AdapterParamCounts(a=a, b=b)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        base_out = self.base(x)
+
+        x_d = self.dropout(x)
+        if self.perm_in is not None:
+            x_d = x_d.index_select(-1, self.perm_in)
+        x_blocks = x_d.reshape(*x_d.shape[:-1], self.g, self.d_in_block)
+
+        z_blocks = torch.einsum("...gd,gmd->...gm", x_blocks, self.lora_A_grouped)
+        z = z_blocks.reshape(*z_blocks.shape[:-2], self.r)
+        delta = torch.matmul(z, self.lora_B.t())
         return base_out + (self.scaling * delta)
 
 
 def iter_adapter_modules(model: nn.Module) -> Iterator[Tuple[str, nn.Module]]:
     for name, module in model.named_modules():
-        if isinstance(module, (LoRALinear, GroupLocalLoRALinear)):
+        if isinstance(module, (LoRALinear, GroupLocalLoRALinear, InputLocalLoRALinear)):
             yield name, module
 
 
@@ -175,4 +323,3 @@ def load_adapter_state_dict(model: nn.Module, state: Dict[str, torch.Tensor], st
 
 def count_params(parameters: Iterable[torch.nn.Parameter]) -> int:
     return sum(int(p.numel()) for p in parameters)
-

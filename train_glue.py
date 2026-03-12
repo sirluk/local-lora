@@ -12,11 +12,27 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--model_name", type=str, default="meta-llama/Llama-3.2-1B-Instruct")
     p.add_argument("--task", type=str, required=True)
 
-    p.add_argument("--adapter_type", type=str, choices=["head_only", "vanilla_lora", "group_local"], required=True)
+    p.add_argument(
+        "--adapter_type",
+        type=str,
+        choices=["head_only", "full_ft", "vanilla_lora", "group_local", "bd_lora"],
+        required=True,
+    )
     p.add_argument("--r", type=int, default=16)
     p.add_argument("--m", type=int, default=None, help="Group-local subrank per group (required for group_local).")
-    p.add_argument("--alpha", type=float, default=None, help="Defaults to r if unset.")
+    p.add_argument("--alpha", type=float, default=None, help="Defaults to r (standard) or sqrt(r) (rs) if unset.")
     p.add_argument("--dropout", type=float, default=0.0)
+    p.add_argument("--scaling_mode", type=str, choices=["standard", "rs"], default="standard")
+    p.add_argument("--grouping_mode", type=str, choices=["contiguous", "random", "head_aligned"], default="contiguous")
+    p.add_argument("--perm_seed", type=int, default=None)
+    p.add_argument("--bd_n", type=int, default=8, help="BD-LoRA block count N (used for adapter_type=bd_lora).")
+    p.add_argument(
+        "--bd_row_factor",
+        type=str,
+        choices=["block_a", "block_b", "dense"],
+        default="block_a",
+        help="BD-LoRA ablation for row-parallel-like layers (o_proj, down_proj).",
+    )
     p.add_argument("--max_length", type=int, default=256)
 
     p.add_argument("--learning_rate", type=float, default=2e-4)
@@ -52,7 +68,6 @@ def main() -> None:
     args = parse_args()
     target_suffixes = tuple(s.strip() for s in args.target_suffixes.split(",") if s.strip())
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    alpha = float(args.alpha) if args.alpha is not None else float(args.r)
     wandb_tags = tuple(s.strip() for s in args.wandb_tags.split(",") if s.strip())
 
     run_glue_task(
@@ -62,8 +77,13 @@ def main() -> None:
         adapter_type=args.adapter_type,
         r=args.r,
         m=args.m,
-        alpha=alpha,
+        alpha=args.alpha,
         dropout=args.dropout,
+        scaling_mode=args.scaling_mode,
+        grouping_mode=args.grouping_mode,
+        perm_seed=args.perm_seed,
+        bd_n=args.bd_n,
+        bd_row_factor=args.bd_row_factor,
         max_length=args.max_length,
         learning_rate=args.learning_rate,
         num_train_epochs=args.num_train_epochs,

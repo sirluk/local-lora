@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import inspect
 import json
+import math
 import os
 import time
 from dataclasses import asdict
@@ -22,7 +23,14 @@ from transformers import (
 )
 
 from .adapters import adapter_state_dict
-from .inject import freeze_model_params, inject_adapters, trainable_param_summary, unfreeze_adapter_params, unfreeze_sequence_classification_head
+from .inject import (
+    freeze_model_params,
+    inject_adapters,
+    inject_bd_lora,
+    trainable_param_summary,
+    unfreeze_adapter_params,
+    unfreeze_sequence_classification_head,
+)
 
 
 TASK_TO_KEYS: Dict[str, Tuple[str, Optional[str]]] = {
@@ -136,10 +144,21 @@ def _write_json(path: Path, obj: Any) -> None:
 
 def _append_results_csv(path: Path, row: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = list(row.keys())
     exists = path.exists()
+    needs_header = (not exists) or (path.stat().st_size == 0)
+    if exists:
+        with path.open("r", newline="") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+        if header and header != fieldnames:
+            raise ValueError(
+                f"results_csv schema mismatch for {str(path)!r}. Existing header has {len(header)} columns, "
+                f"but this run wants {len(fieldnames)} columns. Use a fresh results_csv path (or delete the old file)."
+            )
     with path.open("a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
-        if not exists:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        if needs_header:
             writer.writeheader()
         writer.writerow(row)
 
@@ -152,8 +171,13 @@ def run_glue_task(
     adapter_type: str,
     r: int,
     m: Optional[int],
-    alpha: float,
+    alpha: Optional[float],
     dropout: float,
+    scaling_mode: str = "standard",
+    grouping_mode: str = "contiguous",
+    perm_seed: Optional[int] = None,
+    bd_n: Optional[int] = None,
+    bd_row_factor: str = "block_a",
     max_length: int,
     learning_rate: float,
     num_train_epochs: float,
@@ -180,6 +204,24 @@ def run_glue_task(
     if task not in TASK_TO_KEYS:
         raise ValueError(f"Unknown GLUE task: {task}")
 
+    adapter_type = adapter_type.lower()
+    scaling_mode = scaling_mode.lower()
+    grouping_mode = grouping_mode.lower()
+
+    if scaling_mode not in {"standard", "rs"}:
+        raise ValueError(f"scaling_mode must be one of standard/rs, got {scaling_mode!r}")
+    if grouping_mode not in {"contiguous", "random", "head_aligned"}:
+        raise ValueError(f"grouping_mode must be one of contiguous/random/head_aligned, got {grouping_mode!r}")
+
+    if alpha is None:
+        alpha_v = float(r) if scaling_mode == "standard" else float(math.sqrt(float(r)))
+    else:
+        alpha_v = float(alpha)
+
+    if grouping_mode == "random" and perm_seed is None:
+        # Default to a fixed permutation across seeds unless explicitly overridden.
+        perm_seed = 0
+
     set_seed(seed)
 
     ds = load_dataset("glue", task)
@@ -198,8 +240,22 @@ def run_glue_task(
     _ensure_pad_token(tokenizer, model)
     model.config.use_cache = False
 
+    head_dim = None
+    if grouping_mode == "head_aligned":
+        head_dim = getattr(model.config, "head_dim", None)
+        if head_dim is None:
+            hidden = getattr(model.config, "hidden_size", None)
+            n_heads = getattr(model.config, "num_attention_heads", None)
+            if isinstance(hidden, int) and isinstance(n_heads, int) and n_heads > 0 and (hidden % n_heads) == 0:
+                head_dim = hidden // n_heads
+        if head_dim is None:
+            raise ValueError(
+                "grouping_mode='head_aligned' requires model.config.head_dim or "
+                "(hidden_size and num_attention_heads with hidden_size % num_attention_heads == 0)."
+            )
+
     injection_report = None
-    if adapter_type == "head_only":
+    if adapter_type in {"head_only", "full_ft"}:
         pass
     elif adapter_type == "vanilla_lora":
         injection_report = inject_adapters(
@@ -207,8 +263,12 @@ def run_glue_task(
             adapter_type="vanilla_lora",
             r=r,
             m=None,
-            alpha=alpha,
+            alpha=alpha_v,
             dropout=dropout,
+            scaling_mode=scaling_mode,
+            grouping_mode=grouping_mode,
+            perm_seed=perm_seed,
+            head_dim=int(head_dim) if head_dim is not None else None,
             target_suffixes=target_suffixes,
         )
     elif adapter_type == "group_local":
@@ -219,17 +279,43 @@ def run_glue_task(
             adapter_type="group_local",
             r=r,
             m=m,
-            alpha=alpha,
+            alpha=alpha_v,
             dropout=dropout,
+            scaling_mode=scaling_mode,
+            grouping_mode=grouping_mode,
+            perm_seed=perm_seed,
+            head_dim=int(head_dim) if head_dim is not None else None,
             target_suffixes=target_suffixes,
+        )
+    elif adapter_type == "bd_lora":
+        if bd_n is None:
+            raise ValueError("bd_n is required for adapter_type=bd_lora")
+        bd_row_factor = bd_row_factor.lower()
+        if bd_row_factor not in {"block_a", "block_b", "dense"}:
+            raise ValueError(f"bd_row_factor must be one of block_a/block_b/dense, got {bd_row_factor!r}")
+        injection_report = inject_bd_lora(
+            model,
+            r=r,
+            n=int(bd_n),
+            alpha=alpha_v,
+            dropout=dropout,
+            scaling_mode=scaling_mode,
+            grouping_mode=grouping_mode,
+            perm_seed=perm_seed,
+            bd_row_factor=bd_row_factor,
+            target_suffixes=target_suffixes,
+            head_dim=int(head_dim) if head_dim is not None else None,
         )
     else:
         raise ValueError(f"Unknown adapter_type: {adapter_type}")
 
-    freeze_model_params(model)
-    unfreeze_sequence_classification_head(model)
-    if adapter_type in {"vanilla_lora", "group_local"}:
-        unfreeze_adapter_params(model)
+    m_eff = int(m) if m is not None else (int(r) // int(bd_n) if adapter_type == "bd_lora" and bd_n else None)
+
+    if adapter_type != "full_ft":
+        freeze_model_params(model)
+        unfreeze_sequence_classification_head(model)
+        if adapter_type in {"vanilla_lora", "group_local", "bd_lora"}:
+            unfreeze_adapter_params(model)
 
     tok_ds = _tokenize_dataset(ds, tokenizer=tokenizer, task=task, max_length=max_length)
 
@@ -295,10 +381,17 @@ def run_glue_task(
 
         run_name = wandb_name or out_dir.name
         base_tags = ["glue", task, adapter_type]
-        if adapter_type in {"vanilla_lora", "group_local"}:
+        if adapter_type in {"vanilla_lora", "group_local", "bd_lora"}:
             base_tags.append(f"r{int(r)}")
         if adapter_type == "group_local" and m is not None:
             base_tags.append(f"m{int(m)}")
+        if adapter_type == "bd_lora" and bd_n is not None:
+            base_tags.append(f"n{int(bd_n)}")
+            base_tags.append(f"row_{bd_row_factor}")
+        if scaling_mode != "standard":
+            base_tags.append(f"scaling_{scaling_mode}")
+        if grouping_mode != "contiguous":
+            base_tags.append(f"grouping_{grouping_mode}")
         merged_tags = [t for t in list(wandb_tags) + base_tags if t]
         tags_dedup = list(dict.fromkeys(merged_tags))
 
@@ -307,8 +400,13 @@ def run_glue_task(
             "task": task,
             "adapter_type": adapter_type,
             "r": int(r),
-            "m": int(m) if m is not None else None,
-            "alpha": float(alpha),
+            "m": m_eff,
+            "n": int(bd_n) if adapter_type == "bd_lora" and bd_n is not None else None,
+            "bd_row_factor": bd_row_factor if adapter_type == "bd_lora" else None,
+            "scaling_mode": scaling_mode,
+            "grouping_mode": grouping_mode,
+            "perm_seed": int(perm_seed) if perm_seed is not None else None,
+            "alpha": float(alpha_v),
             "dropout": float(dropout),
             "max_length": int(max_length),
             "learning_rate": float(learning_rate),
@@ -362,8 +460,13 @@ def run_glue_task(
             "task": task,
             "adapter_type": adapter_type,
             "r": int(r),
-            "m": int(m) if m is not None else None,
-            "alpha": float(alpha),
+            "m": m_eff,
+            "n": int(bd_n) if adapter_type == "bd_lora" and bd_n is not None else None,
+            "bd_row_factor": bd_row_factor if adapter_type == "bd_lora" else None,
+            "scaling_mode": scaling_mode,
+            "grouping_mode": grouping_mode,
+            "perm_seed": int(perm_seed) if perm_seed is not None else None,
+            "alpha": float(alpha_v),
             "dropout": float(dropout),
             "max_length": int(max_length),
             "learning_rate": float(learning_rate),
@@ -402,12 +505,20 @@ def run_glue_task(
                     "split": split,
                     "adapter_type": adapter_type,
                     "r": int(r),
-                    "m": int(m) if m is not None else "",
-                    "alpha": float(alpha),
+                    "m": int(m_eff) if m_eff is not None else "",
+                    "n": int(bd_n) if adapter_type == "bd_lora" and bd_n is not None else "",
+                    "bd_row_factor": bd_row_factor if adapter_type == "bd_lora" else "",
+                    "scaling_mode": scaling_mode,
+                    "grouping_mode": grouping_mode,
+                    "perm_seed": int(perm_seed) if perm_seed is not None else "",
+                    "target_suffixes_json": json.dumps(list(target_suffixes)),
+                    "alpha": float(alpha_v),
                     "dropout": float(dropout),
                     "learning_rate": float(learning_rate),
                     "num_train_epochs": float(num_train_epochs),
                     "max_length": int(max_length),
+                    "warmup_ratio": float(warmup_ratio),
+                    "weight_decay": float(weight_decay),
                     "max_train_samples": int(max_train_samples) if max_train_samples is not None else "",
                     "max_eval_samples": int(max_eval_samples) if max_eval_samples is not None else "",
                     "seed": int(seed),
