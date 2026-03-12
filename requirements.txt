@@ -9,3 +9,4 @@ scipy
 sentencepiece
 protobuf
 safetensors
+wandb

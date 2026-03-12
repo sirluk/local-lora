@@ -13,6 +13,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--tasks", type=str, default="sst2,mrpc,rte,qnli")
     p.add_argument("--output_root", type=str, required=True)
     p.add_argument("--results_csv", type=str, default=None)
+    p.add_argument(
+        "--run_tag",
+        type=str,
+        default=None,
+        help="Optional tag used in output subdirectory names (useful for DDP to keep ranks consistent).",
+    )
 
     p.add_argument(
         "--methods",
@@ -96,7 +102,12 @@ def main() -> None:
         sum_d_out = sum(s["d_out"] for s in shapes)
         d_out_list = [s["d_out"] for s in shapes]
 
-    ts = time.strftime("%Y%m%d_%H%M%S")
+    run_tag = args.run_tag
+    if run_tag is None:
+        run_tag = time.strftime("%Y%m%d_%H%M%S")
+    ts = "".join(c if c.isalnum() or c in "-_." else "_" for c in run_tag)
+    if not ts:
+        ts = "run"
     wandb_group = args.wandb_group
     if args.wandb_mode != "disabled" and wandb_group is None:
         wandb_group = f"glue_suite_{ts}"

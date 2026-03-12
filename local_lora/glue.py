@@ -284,9 +284,10 @@ def run_glue_task(
         trainer_kwargs["tokenizer"] = tokenizer
 
     trainer = Trainer(**trainer_kwargs)
+    is_main = trainer.is_world_process_zero()
 
     wandb_run = None
-    if wandb_mode != "disabled" and trainer.is_world_process_zero():
+    if wandb_mode != "disabled" and is_main:
         try:
             import wandb  # type: ignore
         except ModuleNotFoundError as e:
@@ -352,8 +353,9 @@ def run_glue_task(
             cleaned = {k.replace(prefix, ""): float(v) for k, v in metrics.items() if k.startswith(prefix)}
             all_metrics[split] = cleaned
 
-        adapter_sd = adapter_state_dict(model)
-        torch.save(adapter_sd, out_dir / "adapter.pt")
+        if is_main:
+            adapter_sd = adapter_state_dict(model)
+            torch.save(adapter_sd, out_dir / "adapter.pt")
 
         cfg = {
             "model_name": model_name,
@@ -381,11 +383,12 @@ def run_glue_task(
             "trainable_param_summary": trainable_param_summary(model),
             "injection_report": asdict(injection_report) if injection_report is not None else None,
         }
-        _write_json(out_dir / "config.json", cfg)
-        _write_json(out_dir / "metrics.json", all_metrics)
+        if is_main:
+            _write_json(out_dir / "config.json", cfg)
+            _write_json(out_dir / "metrics.json", all_metrics)
 
         # Append results row(s)
-        if results_csv is not None:
+        if is_main and results_csv is not None:
             results_path = Path(results_csv)
             run_id = out_dir.name
             ts = int(time.time())
@@ -416,7 +419,7 @@ def run_glue_task(
                 }
                 _append_results_csv(results_path, row)
 
-        if wandb_run is not None:
+        if wandb_run is not None and is_main:
             import wandb  # type: ignore
 
             wandb.log({"train/train_time_s": float(train_time_s)})
