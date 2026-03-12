@@ -52,22 +52,6 @@ export HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-1}"
 export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 export HF_HUB_DISABLE_TELEMETRY="${HF_HUB_DISABLE_TELEMETRY:-1}"
 
-# Hugging Face auth (meta-llama/* is gated). Prefer an explicit HF_TOKEN.
-if [ -z "${HF_TOKEN:-}" ]; then
-  if [ -n "${HF_HOME:-}" ] && [ -r "${HF_HOME}/token" ]; then
-    export HF_TOKEN="$(<"${HF_HOME}/token")"
-    echo "Loaded HF_TOKEN from ${HF_HOME}/token"
-  elif [ -n "${HOME:-}" ] && [ -r "${HOME}/.cache/huggingface/token" ]; then
-    export HF_TOKEN="$(<"${HOME}/.cache/huggingface/token")"
-    echo "Loaded HF_TOKEN from ${HOME}/.cache/huggingface/token"
-  elif [ -n "${HOME:-}" ] && [ -r "${HOME}/.huggingface/token" ]; then
-    export HF_TOKEN="$(<"${HOME}/.huggingface/token")"
-    echo "Loaded HF_TOKEN from ${HOME}/.huggingface/token"
-  else
-    echo "HF_TOKEN not set; gated Hugging Face repos (e.g. meta-llama/*) may fail to download."
-  fi
-fi
-
 # W&B is optional. Suggested defaults for HPC:
 WANDB_MODE_ARG="${WANDB_MODE_ARG:-offline}" # disabled|offline|online
 
