@@ -46,6 +46,28 @@ TASK_TO_KEYS: Dict[str, Tuple[str, Optional[str]]] = {
 }
 
 
+def _patch_transformers_output_capturing_torch_global() -> None:
+    """
+    Work around a transformers bug that can surface under torch.compile:
+
+        NameError: name 'torch' is not defined
+
+    Some transformers versions import `transformers.utils.output_capturing` in a
+    way that leaves the module-level `torch` symbol undefined even when PyTorch
+    is installed. The wrapper there later references `torch`, crashing at
+    runtime. Injecting the already-imported torch module into that namespace is
+    safe and fixes the issue.
+    """
+
+    try:
+        import transformers.utils.output_capturing as output_capturing  # type: ignore
+    except Exception:
+        return
+
+    if "torch" not in getattr(output_capturing, "__dict__", {}):
+        output_capturing.torch = torch  # type: ignore[attr-defined]
+
+
 def _raise_with_hf_auth_help(model_name: str, err: OSError) -> None:
     msg = str(err).lower()
     if "gated repo" not in msg and "gatedrepoerror" not in msg:
@@ -206,6 +228,9 @@ def run_glue_task(
     task = task.lower()
     if task not in TASK_TO_KEYS:
         raise ValueError(f"Unknown GLUE task: {task}")
+
+    if torch_compile:
+        _patch_transformers_output_capturing_torch_global()
 
     adapter_type = adapter_type.lower()
     scaling_mode = scaling_mode.lower()
