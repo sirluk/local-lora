@@ -46,6 +46,12 @@ export HF_HOME="${HF_HOME:-$PWD/runs/hf_home}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/transformers}"
 export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-$HF_HOME/datasets}"
 
+# Leonardo compute nodes have no outbound internet. Use HF caches only.
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export HF_DATASETS_OFFLINE="${HF_DATASETS_OFFLINE:-1}"
+export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
+export HF_HUB_DISABLE_TELEMETRY="${HF_HUB_DISABLE_TELEMETRY:-1}"
+
 # W&B is optional. Suggested defaults for HPC:
 WANDB_MODE_ARG="${WANDB_MODE_ARG:-offline}" # disabled|offline|online
 
@@ -77,6 +83,10 @@ srun --ntasks=4 --ntasks-per-node=4 --gpus-per-task=1 --kill-on-bad-exit=1 \
     export HF_HOME="'"${HF_HOME:-$PWD/runs/hf_home}"'"
     export TRANSFORMERS_CACHE="'"${TRANSFORMERS_CACHE:-$HF_HOME/transformers}"'"
     export HF_DATASETS_CACHE="'"${HF_DATASETS_CACHE:-$HF_HOME/datasets}"'"
+    export HF_HUB_OFFLINE="'"${HF_HUB_OFFLINE:-1}"'"
+    export HF_DATASETS_OFFLINE="'"${HF_DATASETS_OFFLINE:-1}"'"
+    export TRANSFORMERS_OFFLINE="'"${TRANSFORMERS_OFFLINE:-1}"'"
+    export HF_HUB_DISABLE_TELEMETRY="'"${HF_HUB_DISABLE_TELEMETRY:-1}"'"
     export HF_TOKEN="'"${HF_TOKEN:-}"'"
     export TOKENIZERS_PARALLELISM=false
 
