@@ -40,33 +40,17 @@ cd "${SLURM_SUBMIT_DIR:-$PWD}"
 set +u
 source "${BASHRC_PATH:-$HOME/.bashrc}"
 set -u
-conda activate "${CONDA_ENV:-torch29}"
+conda activate "${CONDA_ENV:-local-lora}"
 
 export HF_HOME="${HF_HOME:-$PWD/runs/hf_home}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME/transformers}"
 export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-$HF_HOME/datasets}"
 
-# Hugging Face auth (meta-llama/* is gated). Prefer an explicit HF_TOKEN.
-if [ -z "${HF_TOKEN:-}" ]; then
-  if [ -n "${HF_HOME:-}" ] && [ -r "${HF_HOME}/token" ]; then
-    export HF_TOKEN="$(<"${HF_HOME}/token")"
-    echo "Loaded HF_TOKEN from ${HF_HOME}/token"
-  elif [ -n "${HOME:-}" ] && [ -r "${HOME}/.cache/huggingface/token" ]; then
-    export HF_TOKEN="$(<"${HOME}/.cache/huggingface/token")"
-    echo "Loaded HF_TOKEN from ${HOME}/.cache/huggingface/token"
-  elif [ -n "${HOME:-}" ] && [ -r "${HOME}/.huggingface/token" ]; then
-    export HF_TOKEN="$(<"${HOME}/.huggingface/token")"
-    echo "Loaded HF_TOKEN from ${HOME}/.huggingface/token"
-  else
-    echo "HF_TOKEN not set; gated Hugging Face repos (e.g. meta-llama/*) may fail to download."
-  fi
-fi
-
 # W&B is optional. Suggested defaults for HPC:
-WANDB_MODE_ARG="${WANDB_MODE_ARG:-disabled}" # disabled|offline|online
+WANDB_MODE_ARG="${WANDB_MODE_ARG:-offline}" # disabled|offline|online
 
 # Default: 4 tasks so each GPU gets 1 GLUE task.
-MODEL_NAME="${MODEL_NAME:-meta-llama/Llama-3.2-1B-Instruct}"
+MODEL_NAME="${MODEL_NAME:-/leonardo_work/EUHPC_D31_132/models/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6}"
 TASKS="${TASKS:-cola,sst2,mrpc,rte}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-runs/leonardo_vanilla_quick_${SLURM_JOBID:-interactive}}"
 
@@ -87,7 +71,7 @@ srun --ntasks=4 --ntasks-per-node=4 --gpus-per-task=1 --kill-on-bad-exit=1 \
     set +u
     source "'"${BASHRC_PATH:-$HOME/.bashrc}"'"
     set -u
-    conda activate "'"${CONDA_ENV:-torch29}"'"
+    conda activate "'"${CONDA_ENV:-local-lora}"'"
     cd "'"${SLURM_SUBMIT_DIR:-$PWD}"'"
 
     export HF_HOME="'"${HF_HOME:-$PWD/runs/hf_home}"'"
