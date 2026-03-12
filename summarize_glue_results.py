@@ -20,6 +20,9 @@ CONFIG_FIELDS: Tuple[str, ...] = (
     "scaling_mode",
     "grouping_mode",
     "perm_seed",
+    "torch_compile",
+    "torch_compile_backend",
+    "torch_compile_mode",
     "target_suffixes_json",
     "alpha",
     "dropout",
@@ -82,7 +85,7 @@ def main() -> None:
     for r in rows:
         cfg: List[Any] = []
         for k in CONFIG_FIELDS:
-            if k in {"r", "m", "n", "perm_seed", "max_length"}:
+            if k in {"r", "m", "n", "perm_seed", "max_length", "torch_compile"}:
                 cfg.append(_int_or_none(r.get(k, "")))
             elif k in {"alpha", "dropout", "learning_rate", "num_train_epochs", "warmup_ratio", "weight_decay"}:
                 cfg.append(_float_or_none(r.get(k, "")))
@@ -173,4 +176,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

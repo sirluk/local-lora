@@ -34,6 +34,12 @@ sbatch --export=ALL,OUTPUT_ROOT=/path/to/runs,MODEL_NAME_3B=/path/to/3b/snapshot
   slurm/leonardo/leonardo_acl_final_glue_ddp_1n4g.sh
 ```
 
+Optional speed knob (all Leonardo scripts support this):
+```bash
+sbatch --export=ALL,TORCH_COMPILE=1,TORCH_COMPILE_BACKEND=inductor,TORCH_COMPILE_MODE=reduce-overhead \
+  slurm/leonardo/leonardo_acl_protocol_lock_attn_only_ddp_1n4g.sh
+```
+
 ## Stage 0 — Sanity + instrumentation (fast)
 Run a couple of short runs to confirm:
 - adapters inject correctly (1B + 3B)

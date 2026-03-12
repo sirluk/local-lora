@@ -55,6 +55,21 @@ export HF_HUB_DISABLE_TELEMETRY="${HF_HUB_DISABLE_TELEMETRY:-1}"
 
 WANDB_MODE_ARG="${WANDB_MODE_ARG:-offline}" # disabled|offline|online
 
+# Optional speed knob: torch.compile (default off)
+TORCH_COMPILE="${TORCH_COMPILE:-0}" # set to 1 to enable
+TORCH_COMPILE_BACKEND="${TORCH_COMPILE_BACKEND:-}"
+TORCH_COMPILE_MODE="${TORCH_COMPILE_MODE:-}"
+COMPILE_ARGS=()
+if [ "${TORCH_COMPILE}" = "1" ]; then
+  COMPILE_ARGS+=(--torch_compile)
+  if [ -n "${TORCH_COMPILE_BACKEND}" ]; then
+    COMPILE_ARGS+=(--torch_compile_backend "${TORCH_COMPILE_BACKEND}")
+  fi
+  if [ -n "${TORCH_COMPILE_MODE}" ]; then
+    COMPILE_ARGS+=(--torch_compile_mode "${TORCH_COMPILE_MODE}")
+  fi
+fi
+
 # Defaults (override via sbatch --export=ALL,VAR=...)
 MODEL_NAME_1B="${MODEL_NAME_1B:-/leonardo_work/EUHPC_D31_132/models/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6}"
 TASKS="${TASKS:-sst2,mrpc,rte,cola}"
@@ -126,6 +141,7 @@ torchrun --standalone --nproc_per_node="${NPROC}" --master_port="${MASTER_PORT}"
   --wandb_mode "${WANDB_MODE_ARG}" \
   --wandb_entity hauzenberger \
   --wandb_project local-lora \
+  ${COMPILE_ARGS[@]:+"${COMPILE_ARGS[@]}"} \
   --bf16
 
 python summarize_glue_results.py --results_csv "${OUTPUT_ROOT}/results.csv" || true

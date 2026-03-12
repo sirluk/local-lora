@@ -54,6 +54,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--scaling_mode", type=str, choices=["standard", "rs"], default="standard")
     p.add_argument("--grouping_mode", type=str, choices=["contiguous", "random", "head_aligned"], default="contiguous")
     p.add_argument("--perm_seed", type=int, default=None)
+    p.add_argument(
+        "--torch_compile",
+        action="store_true",
+        help="Enable torch.compile for the model (uses HF Trainer integration when available).",
+    )
+    p.add_argument("--torch_compile_backend", type=str, default=None, help="Optional torch.compile backend.")
+    p.add_argument("--torch_compile_mode", type=str, default=None, help="Optional torch.compile mode.")
 
     p.add_argument("--learning_rate", type=float, default=2e-4)
     p.add_argument("--num_train_epochs", type=float, default=3.0)
@@ -134,6 +141,11 @@ def main() -> None:
     bd_n_values = [int(x) for x in split_csv(args.bd_n_values)]
     target_suffixes = tuple(split_csv(args.target_suffixes))
     wandb_tags = tuple(split_csv(args.wandb_tags))
+    compile_kwargs = dict(
+        torch_compile=bool(args.torch_compile),
+        torch_compile_backend=args.torch_compile_backend,
+        torch_compile_mode=args.torch_compile_mode,
+    )
 
     model_names = split_csv(args.model_names) if args.model_names else [args.model_name]
     seeds = [int(x) for x in split_csv(args.seeds)] if args.seeds else [int(args.seed)]
@@ -277,6 +289,7 @@ def main() -> None:
                                         wandb_name=None,
                                         wandb_group=wandb_group,
                                         wandb_tags=wandb_tags,
+                                        **compile_kwargs,
                                         target_suffixes=target_suffixes,
                                     )
 
@@ -325,6 +338,7 @@ def main() -> None:
                                         wandb_name=None,
                                         wandb_group=wandb_group,
                                         wandb_tags=wandb_tags,
+                                        **compile_kwargs,
                                         target_suffixes=target_suffixes,
                                     )
 
@@ -373,6 +387,7 @@ def main() -> None:
                                         wandb_name=None,
                                         wandb_group=wandb_group,
                                         wandb_tags=wandb_tags,
+                                        **compile_kwargs,
                                         target_suffixes=target_suffixes,
                                     )
 
@@ -422,6 +437,7 @@ def main() -> None:
                                             wandb_name=None,
                                             wandb_group=wandb_group,
                                             wandb_tags=wandb_tags,
+                                            **compile_kwargs,
                                             target_suffixes=target_suffixes,
                                         )
 
@@ -471,6 +487,7 @@ def main() -> None:
                                             wandb_name=None,
                                             wandb_group=wandb_group,
                                             wandb_tags=wandb_tags,
+                                            **compile_kwargs,
                                             target_suffixes=target_suffixes,
                                         )
 
@@ -530,6 +547,7 @@ def main() -> None:
                                             wandb_name=None,
                                             wandb_group=wandb_group,
                                             wandb_tags=wandb_tags,
+                                            **compile_kwargs,
                                             target_suffixes=target_suffixes,
                                         )
 

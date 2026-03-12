@@ -178,6 +178,9 @@ def run_glue_task(
     perm_seed: Optional[int] = None,
     bd_n: Optional[int] = None,
     bd_row_factor: str = "block_a",
+    torch_compile: bool = False,
+    torch_compile_backend: Optional[str] = None,
+    torch_compile_mode: Optional[str] = None,
     max_length: int,
     learning_rate: float,
     num_train_epochs: float,
@@ -335,25 +338,54 @@ def run_glue_task(
     if wandb_mode not in {"disabled", "online", "offline"}:
         raise ValueError(f"wandb_mode must be one of disabled/online/offline, got {wandb_mode}")
 
-    args = TrainingArguments(
-        output_dir=str(out_dir / "trainer_out"),
-        per_device_train_batch_size=int(per_device_train_batch_size),
-        per_device_eval_batch_size=int(per_device_eval_batch_size),
-        learning_rate=float(learning_rate),
-        num_train_epochs=float(num_train_epochs),
-        gradient_accumulation_steps=int(gradient_accumulation_steps),
-        weight_decay=float(weight_decay),
-        warmup_ratio=float(warmup_ratio),
-        logging_strategy="steps",
-        logging_steps=50,
-        eval_strategy="no",
-        save_strategy="no",
-        report_to=(["wandb"] if wandb_mode != "disabled" else []),
-        run_name=(wandb_name or out_dir.name) if wandb_mode != "disabled" else None,
-        bf16=bool(bf16),
-        fp16=bool(fp16),
-        seed=int(seed),
-    )
+    ta_sig = inspect.signature(TrainingArguments.__init__)
+    ta_params = ta_sig.parameters
+
+    eval_strategy_key = "eval_strategy" if "eval_strategy" in ta_params else "evaluation_strategy"
+    args_kwargs: Dict[str, Any] = {
+        "output_dir": str(out_dir / "trainer_out"),
+        "per_device_train_batch_size": int(per_device_train_batch_size),
+        "per_device_eval_batch_size": int(per_device_eval_batch_size),
+        "learning_rate": float(learning_rate),
+        "num_train_epochs": float(num_train_epochs),
+        "gradient_accumulation_steps": int(gradient_accumulation_steps),
+        "weight_decay": float(weight_decay),
+        "warmup_ratio": float(warmup_ratio),
+        "logging_strategy": "steps",
+        "logging_steps": 50,
+        eval_strategy_key: "no",
+        "save_strategy": "no",
+        "report_to": (["wandb"] if wandb_mode != "disabled" else []),
+        "run_name": (wandb_name or out_dir.name) if wandb_mode != "disabled" else None,
+        "bf16": bool(bf16),
+        "fp16": bool(fp16),
+        "seed": int(seed),
+    }
+
+    # torch.compile support:
+    manual_compile = False
+    if torch_compile:
+        if "torch_compile" in ta_params:
+            # Prefer HF-native compilation (handles device placement / DDP integration).
+            args_kwargs["torch_compile"] = True
+            if torch_compile_backend is not None and "torch_compile_backend" in ta_params:
+                args_kwargs["torch_compile_backend"] = str(torch_compile_backend)
+            if torch_compile_mode is not None and "torch_compile_mode" in ta_params:
+                args_kwargs["torch_compile_mode"] = str(torch_compile_mode)
+        else:
+            manual_compile = True
+
+    args = TrainingArguments(**args_kwargs)
+
+    if manual_compile:
+        if not hasattr(torch, "compile"):
+            raise RuntimeError("torch.compile requested, but this PyTorch build has no torch.compile.")
+        compile_kwargs = {}
+        if torch_compile_backend is not None:
+            compile_kwargs["backend"] = str(torch_compile_backend)
+        if torch_compile_mode is not None:
+            compile_kwargs["mode"] = str(torch_compile_mode)
+        model = torch.compile(model, **compile_kwargs)  # type: ignore[attr-defined]
 
     trainer_kwargs = dict(
         model=model,
@@ -406,6 +438,9 @@ def run_glue_task(
             "scaling_mode": scaling_mode,
             "grouping_mode": grouping_mode,
             "perm_seed": int(perm_seed) if perm_seed is not None else None,
+            "torch_compile": bool(torch_compile),
+            "torch_compile_backend": str(torch_compile_backend) if torch_compile_backend is not None else None,
+            "torch_compile_mode": str(torch_compile_mode) if torch_compile_mode is not None else None,
             "alpha": float(alpha_v),
             "dropout": float(dropout),
             "max_length": int(max_length),
@@ -466,6 +501,9 @@ def run_glue_task(
             "scaling_mode": scaling_mode,
             "grouping_mode": grouping_mode,
             "perm_seed": int(perm_seed) if perm_seed is not None else None,
+            "torch_compile": bool(torch_compile),
+            "torch_compile_backend": str(torch_compile_backend) if torch_compile_backend is not None else None,
+            "torch_compile_mode": str(torch_compile_mode) if torch_compile_mode is not None else None,
             "alpha": float(alpha_v),
             "dropout": float(dropout),
             "max_length": int(max_length),
@@ -511,6 +549,9 @@ def run_glue_task(
                     "scaling_mode": scaling_mode,
                     "grouping_mode": grouping_mode,
                     "perm_seed": int(perm_seed) if perm_seed is not None else "",
+                    "torch_compile": int(1 if torch_compile else 0),
+                    "torch_compile_backend": str(torch_compile_backend) if torch_compile_backend is not None else "",
+                    "torch_compile_mode": str(torch_compile_mode) if torch_compile_mode is not None else "",
                     "target_suffixes_json": json.dumps(list(target_suffixes)),
                     "alpha": float(alpha_v),
                     "dropout": float(dropout),

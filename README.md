@@ -32,6 +32,7 @@ This code assumes the conda env `torch210` (already present on this machine) whi
 - `--scaling_mode standard|rs` (defaults `alpha` to `r` (standard) or `sqrt(r)` (rs) when `--alpha` is unset)
 - `--grouping_mode contiguous|random|head_aligned` (random uses a deterministic permutation; set `--perm_seed` to control)
 - BD-LoRA: `--adapter_type bd_lora --bd_n 4|8 --bd_row_factor block_a|block_b|dense`
+- Optional compile: `--torch_compile [--torch_compile_backend BACKEND] [--torch_compile_mode MODE]`
 
 ## Run a small GLUE suite
 

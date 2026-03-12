@@ -33,6 +33,13 @@ def parse_args() -> argparse.Namespace:
         default="block_a",
         help="BD-LoRA ablation for row-parallel-like layers (o_proj, down_proj).",
     )
+    p.add_argument(
+        "--torch_compile",
+        action="store_true",
+        help="Enable torch.compile for the model (uses HF Trainer integration when available).",
+    )
+    p.add_argument("--torch_compile_backend", type=str, default=None, help="Optional torch.compile backend.")
+    p.add_argument("--torch_compile_mode", type=str, default=None, help="Optional torch.compile mode.")
     p.add_argument("--max_length", type=int, default=256)
 
     p.add_argument("--learning_rate", type=float, default=2e-4)
@@ -84,6 +91,9 @@ def main() -> None:
         perm_seed=args.perm_seed,
         bd_n=args.bd_n,
         bd_row_factor=args.bd_row_factor,
+        torch_compile=args.torch_compile,
+        torch_compile_backend=args.torch_compile_backend,
+        torch_compile_mode=args.torch_compile_mode,
         max_length=args.max_length,
         learning_rate=args.learning_rate,
         num_train_epochs=args.num_train_epochs,
