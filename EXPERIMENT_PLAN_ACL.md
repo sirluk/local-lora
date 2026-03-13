@@ -172,7 +172,21 @@ Run on full GLUE (report WNLI separately):
 
 Use the fixed recipe from Stage 1 (single LR/max_length/warmup/scaling/targets choice).
 
-Leonardo: `sbatch slurm/leonardo/leonardo_acl_final_glue_ddp_1n4g.sh`
+Leonardo:
+- single job: `sbatch slurm/leonardo/leonardo_acl_final_glue_ddp_1n4g.sh`
+- split launcher (safer for strict walltime limits): `bash slurm/leonardo/launch_acl_final_glue_split.sh`
+
+The split launcher submits one job per `(model, seed, method_group)` triple. Like the Stage 1 launcher,
+it also honors `DRY_RUN=1`, `JOB_TIME=...`, optional `SBATCH_QOS=...`, and the `TORCH_COMPILE*` env vars.
+
+Example split launch:
+```bash
+TORCH_COMPILE=1 \
+TORCH_COMPILE_BACKEND=inductor \
+TORCH_COMPILE_MODE=reduce-overhead \
+JOB_TIME=1-00:00:00 \
+bash slurm/leonardo/launch_acl_final_glue_split.sh
+```
 
 Example (replace `<...>` with chosen settings):
 ```bash
@@ -209,6 +223,16 @@ On `{mrpc, rte, cola}` (1B; seeds 0/1/2), compare for BD-LoRA row-parallel-like 
 
 Leonardo: `sbatch slurm/leonardo/leonardo_acl_ablation_row_factor_ddp_1n4g.sh`
 
+Split launcher: `bash slurm/leonardo/launch_acl_ablation_row_factor_split.sh`
+
+This launcher submits one job per `bd_row_factor` value.
+
+Example:
+```bash
+JOB_TIME=1-00:00:00 \
+bash slurm/leonardo/launch_acl_ablation_row_factor_split.sh
+```
+
 Template:
 ```bash
 conda run -n torch210 python run_glue_suite.py \
@@ -234,6 +258,16 @@ Repeat for `block_b` / `dense`.
 
 Leonardo: `sbatch slurm/leonardo/leonardo_acl_ablation_granularity_ddp_1n4g.sh`
 
+Split launcher: `bash slurm/leonardo/launch_acl_ablation_granularity_split.sh`
+
+This launcher submits separate jobs for `vanilla_lora`, `bd_lora`, and `group_local_param`.
+
+Example:
+```bash
+JOB_TIME=1-00:00:00 \
+bash slurm/leonardo/launch_acl_ablation_granularity_split.sh
+```
+
 ### A3) Head-aligned vs random grouping
 Use:
 - `--grouping_mode head_aligned` (requires model head_dim inference; errors if divisibility doesn’t hold)
@@ -241,11 +275,31 @@ Use:
 
 Leonardo: `sbatch slurm/leonardo/leonardo_acl_ablation_grouping_modes_ddp_1n4g.sh`
 
+Split launcher: `bash slurm/leonardo/launch_acl_ablation_grouping_modes_split.sh`
+
+This launcher submits one job per grouping mode.
+
+Example:
+```bash
+JOB_TIME=1-00:00:00 \
+bash slurm/leonardo/launch_acl_ablation_grouping_modes_split.sh
+```
+
 ### A4) Low-data regime
 Tasks `{rte, mrpc, cola}` with `--max_train_samples 128|512|2048|<unset>` (full).
 Compare `vanilla_lora`, `group_local`, `bd_lora`, `full_ft`.
 
 Leonardo: `sbatch slurm/leonardo/leonardo_acl_ablation_low_data_ddp_1n4g.sh`
+
+Split launcher: `bash slurm/leonardo/launch_acl_ablation_low_data_split.sh`
+
+This launcher submits one job per data regime (`128`, `512`, `2048`, `full`).
+
+Example:
+```bash
+JOB_TIME=1-00:00:00 \
+bash slurm/leonardo/launch_acl_ablation_low_data_split.sh
+```
 
 ## Practical notes
 - `results.csv` schema is versioned implicitly: if you ran older code, use a **fresh** `--results_csv` (or delete the old file).
