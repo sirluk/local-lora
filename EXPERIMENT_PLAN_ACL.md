@@ -66,6 +66,12 @@ Tasks: `{sst2, mrpc, rte, cola}`.
 Leonardo:
 - attention-only: `sbatch slurm/leonardo/leonardo_acl_protocol_lock_attn_only_ddp_1n4g.sh`
 - attention+mlp: `sbatch slurm/leonardo/leonardo_acl_protocol_lock_attn_mlp_ddp_1n4g.sh`
+- split launcher (safer for strict walltime limits): `bash slurm/leonardo/launch_acl_protocol_lock_split.sh`
+
+If your per-job walltime is tight (for example 2 days on Leonardo), prefer the split launcher.
+It submits one smaller job per hyperparameter setting instead of serializing the full Stage 1 grid
+inside a single `torchrun` allocation. Use `VARIANT=attn_only` or `VARIANT=attn_mlp` and
+optionally `DRY_RUN=1` to inspect the generated submissions first.
 
 Grid (shared where applicable):
 - LoRA-like LR: `{1e-5, 2e-5, 5e-5, 1e-4}`
