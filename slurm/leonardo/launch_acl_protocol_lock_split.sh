@@ -47,6 +47,7 @@ GROUPING_MODE="${GROUPING_MODE:-contiguous}"
 JOB_TIME="${JOB_TIME:-1-00:00:00}"
 JOB_NAME_PREFIX="${JOB_NAME_PREFIX:-aclp1}"
 OUTPUT_ROOT_BASE="${OUTPUT_ROOT_BASE:-runs/leonardo_acl_protocol_lock_split_${VARIANT}_$(date +%Y%m%d_%H%M%S)}"
+SBATCH_QOS="${SBATCH_QOS:-}"
 
 SUBMIT_HEAD_ONLY="${SUBMIT_HEAD_ONLY:-1}"
 SUBMIT_FULL_FT="${SUBMIT_FULL_FT:-1}"
@@ -83,6 +84,11 @@ echo "  base script    : ${BASE_SCRIPT}"
 echo "  tasks          : ${TASKS}"
 echo "  output root    : ${OUTPUT_ROOT_BASE}"
 echo "  job time       : ${JOB_TIME}"
+if [ -n "${SBATCH_QOS}" ]; then
+  echo "  sbatch qos     : ${SBATCH_QOS}"
+else
+  echo "  sbatch qos     : <default>"
+fi
 echo "  head_only jobs : ${head_count}"
 echo "  full_ft jobs   : ${full_ft_count}"
 echo "  adapter jobs   : ${adapter_count}"
@@ -119,9 +125,19 @@ submit_job() {
   local output_root="${OUTPUT_ROOT_BASE}/${tag}"
   local job_name="${JOB_NAME_PREFIX}-${tag}"
   local export_spec="ALL,TASKS,OUTPUT_ROOT,METHODS,LORA_LRS,FT_LRS,MAX_LENGTHS,WARMUP_RATIOS,SCALING_MODES,M_VALUES,BD_N_VALUES,BD_ROW_FACTOR,GROUPING_MODE"
+  local -a sbatch_args=(
+    --parsable
+    --time "${JOB_TIME}"
+    --job-name "${job_name}"
+    --export="${export_spec}"
+  )
+
+  if [ -n "${SBATCH_QOS}" ]; then
+    sbatch_args+=(--qos "${SBATCH_QOS}")
+  fi
 
   if [ "${DRY_RUN}" = "1" ]; then
-    echo "DRY_RUN sbatch --time ${JOB_TIME} --job-name ${job_name} ${BASE_SCRIPT}"
+    echo "DRY_RUN sbatch ${sbatch_args[*]} ${BASE_SCRIPT}"
     echo "        METHODS=${methods} LORA_LRS=${lora_lr:-<unused>} FT_LRS=${ft_lr:-<unused>} MAX_LENGTHS=${max_length} WARMUP_RATIOS=${warmup_ratio} SCALING_MODES=${scaling_mode:-<unused>} OUTPUT_ROOT=${output_root}"
     return 0
   fi
@@ -140,7 +156,7 @@ submit_job() {
     BD_N_VALUES="${BD_N_VALUES}" \
     BD_ROW_FACTOR="${BD_ROW_FACTOR}" \
     GROUPING_MODE="${GROUPING_MODE}" \
-    sbatch --parsable --time "${JOB_TIME}" --job-name "${job_name}" --export="${export_spec}" "${BASE_SCRIPT}"
+    sbatch "${sbatch_args[@]}" "${BASE_SCRIPT}"
   )"
 
   echo "submitted ${job_id} -> ${job_name}"

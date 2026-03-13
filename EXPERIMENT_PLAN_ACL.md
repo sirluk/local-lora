@@ -73,6 +73,50 @@ It submits one smaller job per hyperparameter setting instead of serializing the
 inside a single `torchrun` allocation. Use `VARIANT=attn_only` or `VARIANT=attn_mlp` and
 optionally `DRY_RUN=1` to inspect the generated submissions first.
 
+Split-launcher examples:
+
+Dry run (inspect generated `sbatch` commands only):
+```bash
+DRY_RUN=1 \
+VARIANT=attn_only \
+bash slurm/leonardo/launch_acl_protocol_lock_split.sh
+```
+
+Phase 1 attention-only sweep (recommended default):
+```bash
+JOB_TIME=1-00:00:00 \
+VARIANT=attn_only \
+bash slurm/leonardo/launch_acl_protocol_lock_split.sh
+```
+
+Phase 1 attention-only sweep with `torch.compile`:
+```bash
+TORCH_COMPILE=1 \
+TORCH_COMPILE_BACKEND=inductor \
+TORCH_COMPILE_MODE=reduce-overhead \
+JOB_TIME=1-00:00:00 \
+VARIANT=attn_only \
+bash slurm/leonardo/launch_acl_protocol_lock_split.sh
+```
+
+Same as above, but with an explicit QoS override only when needed:
+```bash
+SBATCH_QOS=boost_qos_lprod \
+TORCH_COMPILE=1 \
+TORCH_COMPILE_BACKEND=inductor \
+TORCH_COMPILE_MODE=reduce-overhead \
+JOB_TIME=1-00:00:00 \
+VARIANT=attn_only \
+bash slurm/leonardo/launch_acl_protocol_lock_split.sh
+```
+
+Attention+MLP variant:
+```bash
+JOB_TIME=1-00:00:00 \
+VARIANT=attn_mlp \
+bash slurm/leonardo/launch_acl_protocol_lock_split.sh
+```
+
 Grid (shared where applicable):
 - LoRA-like LR: `{1e-5, 2e-5, 5e-5, 1e-4}`
 - Full-FT LR: `{5e-6, 1e-5, 2e-5}`
@@ -83,7 +127,7 @@ Grid (shared where applicable):
   - attention-only: `q_proj,v_proj`
   - attention+mlp: `q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj`
 
-Command template:
+Underlying single-job command template:
 ```bash
 conda run -n torch210 python run_glue_suite.py \
   --methods all \

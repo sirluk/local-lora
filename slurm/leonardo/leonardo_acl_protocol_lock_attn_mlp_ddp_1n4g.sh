@@ -7,7 +7,6 @@
 #SBATCH --job-name=acl-proto-mlp-ddp-1n4g
 #SBATCH --account=aifac_5l0_356
 #SBATCH --partition=boost_usr_prod
-#SBATCH --qos=boost_qos_lprod
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --ntasks-per-node=1
