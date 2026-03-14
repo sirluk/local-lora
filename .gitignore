@@ -15,4 +15,4 @@ runs/
 outputs/
 slurm_logs/*
 !slurm_logs/.gitkeep
-wandb/
+wandb*
