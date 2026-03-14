@@ -1,0 +1,76 @@
+{
+  "best_bd_lora": [
+    {
+      "avg_score": 0.8298565809693396,
+      "n": 4,
+      "task_scores": {
+        "cola": 0.6171523641571487,
+        "mrpc": 0.8986232790988735,
+        "rte": 0.8483754512635379,
+        "sst2": 0.9552752293577982
+      }
+    },
+    {
+      "avg_score": 0.8261115957827823,
+      "n": 8,
+      "task_scores": {
+        "cola": 0.624558539017041,
+        "mrpc": 0.8903381140442043,
+        "rte": 0.8411552346570397,
+        "sst2": 0.948394495412844
+      }
+    }
+  ],
+  "best_full_ft": {
+    "avg_score": 0.8257817402435592,
+    "learning_rate": 2e-05,
+    "task_scores": {
+      "cola": 0.6135727029307729,
+      "mrpc": 0.8906604747162024,
+      "rte": 0.8447653429602888,
+      "sst2": 0.9541284403669725
+    }
+  },
+  "best_group_local_equal": {
+    "avg_score": 0.832378055479013,
+    "m": 1,
+    "r": 16,
+    "task_scores": {
+      "cola": 0.6414271135354123,
+      "mrpc": 0.8903381140442043,
+      "rte": 0.8447653429602888,
+      "sst2": 0.9529816513761468
+    }
+  },
+  "best_group_local_param": {
+    "avg_score": 0.828051526817715,
+    "m": 4,
+    "r": 16,
+    "task_scores": {
+      "cola": 0.6171523641571487,
+      "mrpc": 0.8986232790988735,
+      "rte": 0.8411552346570397,
+      "sst2": 0.9552752293577982
+    }
+  },
+  "chosen_recipe": {
+    "avg_score": 0.8309018378050451,
+    "learning_rate": 5e-05,
+    "max_length": 256,
+    "scaling_mode": "rs",
+    "target_set": "attn_only",
+    "task_scores": {
+      "cola": 0.6181674636002474,
+      "mrpc": 0.8943992490613266,
+      "rte": 0.8592057761732852,
+      "sst2": 0.9518348623853211
+    },
+    "warmup_ratio": 0.05
+  },
+  "chosen_target_set": "attn_only",
+  "paths": {
+    "report_md": "reports/stage1/stage1_report.md",
+    "runs_csv": "reports/stage1/stage1_runs.csv",
+    "summary_json": "reports/stage1/stage1_report.summary.json"
+  }
+}

@@ -327,7 +327,10 @@ def freeze_model_params(model: nn.Module) -> None:
 def unfreeze_adapter_params(model: nn.Module) -> None:
     for _, module in model.named_modules():
         if isinstance(module, (LoRALinear, GroupLocalLoRALinear, InputLocalLoRALinear)):
-            for p in module.parameters():
+            # Only unfreeze adapter parameters; keep the wrapped base Linear frozen.
+            # NOTE: `module.parameters()` would recurse into `module.base` and would
+            # accidentally unfreeze the original projection weights.
+            for _, p in module.named_parameters(recurse=False):
                 p.requires_grad = True
 
 

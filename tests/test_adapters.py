@@ -6,10 +6,57 @@ import torch
 from torch import nn
 
 from local_lora.adapters import GroupLocalLoRALinear, InputLocalLoRALinear, LoRALinear
-from local_lora.inject import inject_adapters, inject_bd_lora
+from local_lora.inject import (
+    freeze_model_params,
+    inject_adapters,
+    inject_bd_lora,
+    trainable_param_summary,
+    unfreeze_adapter_params,
+)
 
 
 class TestAdapters(unittest.TestCase):
+    def test_unfreeze_adapter_params_does_not_unfreeze_base(self):
+        class Toy(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.q_proj = nn.Linear(8, 12, bias=False)
+                self.v_proj = nn.Linear(8, 6, bias=False)
+
+            def forward(self, x):
+                return self.q_proj(x) + self.v_proj(x)
+
+        toy = Toy()
+        inject_adapters(toy, adapter_type="vanilla_lora", r=4, alpha=4.0, dropout=0.0, target_suffixes=("q_proj", "v_proj"))
+
+        # Typical training path: freeze everything, then unfreeze adapters only.
+        freeze_model_params(toy)
+        unfreeze_adapter_params(toy)
+
+        self.assertIsInstance(toy.q_proj, LoRALinear)
+        self.assertIsInstance(toy.v_proj, LoRALinear)
+
+        # Base weights must remain frozen.
+        self.assertFalse(toy.q_proj.base.weight.requires_grad)
+        self.assertFalse(toy.v_proj.base.weight.requires_grad)
+
+        # Adapter weights must be trainable.
+        self.assertTrue(toy.q_proj.lora_A.requires_grad)
+        self.assertTrue(toy.q_proj.lora_B.requires_grad)
+        self.assertTrue(toy.v_proj.lora_A.requires_grad)
+        self.assertTrue(toy.v_proj.lora_B.requires_grad)
+
+        # And the trainable param summary must reflect only adapter params (no base weights).
+        summary = trainable_param_summary(toy)
+        expected = (
+            toy.q_proj.lora_A.numel()
+            + toy.q_proj.lora_B.numel()
+            + toy.v_proj.lora_A.numel()
+            + toy.v_proj.lora_B.numel()
+        )
+        self.assertEqual(summary["adapter_trainable_params"], expected)
+        self.assertEqual(summary["trainable_params"], expected)
+
     def test_scaling_modes(self):
         base = nn.Linear(8, 12, bias=False)
         lora_std = LoRALinear(base, r=16, alpha=16.0, dropout=0.0, scaling_mode="standard")

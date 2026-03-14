@@ -46,6 +46,29 @@ TASK_TO_KEYS: Dict[str, Tuple[str, Optional[str]]] = {
 }
 
 
+def _unwrap_model_for_adapters(model: torch.nn.Module) -> torch.nn.Module:
+    """
+    Normalize wrappers introduced by torch.compile and distributed wrappers so that:
+    - module names/keys in adapter state dict stay stable
+    - sanity checks look at the actual underlying module tree
+    """
+
+    cur = model
+    for _ in range(4):
+        # DDP/FSDP-style wrappers often expose `.module`.
+        inner = getattr(cur, "module", None)
+        if isinstance(inner, torch.nn.Module):
+            cur = inner
+            continue
+        # torch.compile returns an OptimizedModule exposing `._orig_mod`.
+        inner = getattr(cur, "_orig_mod", None)
+        if isinstance(inner, torch.nn.Module):
+            cur = inner
+            continue
+        break
+    return cur
+
+
 def _patch_transformers_output_capturing_torch_global() -> None:
     """
     Work around a transformers bug that can surface under torch.compile:
@@ -429,6 +452,60 @@ def run_glue_task(
     trainer = Trainer(**trainer_kwargs)
     is_main = trainer.is_world_process_zero()
 
+    # Sanity-check: ensure adapter runs are truly adapter-only (plus the task head).
+    # This is a guardrail against accidentally unfreezing the wrapped base Linear weights.
+    if injection_report is not None and adapter_type in {"vanilla_lora", "group_local", "bd_lora"}:
+        skip = os.environ.get("LOCAL_LORA_SKIP_ADAPTER_SANITY_CHECK", "").strip().lower() in {"1", "true", "yes"}
+        if not skip:
+            base_model = _unwrap_model_for_adapters(model)
+            summary = trainable_param_summary(base_model)
+            inj_total = int(injection_report.adapter_params_total)
+            adapter_trainable = int(summary["adapter_trainable_params"])
+
+            if inj_total <= 0:
+                raise RuntimeError("Adapter sanity check failed: injection_report.adapter_params_total <= 0.")
+
+            if adapter_trainable != inj_total:
+                ratio = float(adapter_trainable) / float(inj_total)
+                raise RuntimeError(
+                    "Adapter sanity check failed: trainable adapter params do not match injected adapter params.\n"
+                    f"- adapter_type={adapter_type}\n"
+                    f"- injected_adapter_params={inj_total}\n"
+                    f"- trainable_adapter_params={adapter_trainable}\n"
+                    f"- ratio={ratio:.3f}\n"
+                    "This usually means some wrapped base weights were unintentionally left trainable.\n"
+                    "Set LOCAL_LORA_SKIP_ADAPTER_SANITY_CHECK=1 to bypass (not recommended)."
+                )
+
+            total_trainable = int(summary["trainable_params"])
+            extra_trainable = total_trainable - adapter_trainable
+            head_trainable = 0
+            for attr in ("score", "classifier", "classification_head"):
+                head = getattr(base_model, attr, None)
+                if isinstance(head, torch.nn.Module):
+                    head_trainable += sum(int(p.numel()) for p in head.parameters() if p.requires_grad)
+
+            # If we can identify a head module, require that only (head + adapters) are trainable.
+            if head_trainable > 0 and extra_trainable != head_trainable:
+                raise RuntimeError(
+                    "Adapter sanity check failed: unexpected extra trainable params beyond adapters/head.\n"
+                    f"- adapter_type={adapter_type}\n"
+                    f"- total_trainable_params={total_trainable}\n"
+                    f"- trainable_adapter_params={adapter_trainable}\n"
+                    f"- expected_head_trainable_params={head_trainable}\n"
+                    f"- observed_non_adapter_trainable_params={extra_trainable}\n"
+                    "Set LOCAL_LORA_SKIP_ADAPTER_SANITY_CHECK=1 to bypass (not recommended)."
+                )
+            # Fallback: if we couldn't locate the head module, still catch egregious leaks.
+            if head_trainable == 0 and extra_trainable > 1_000_000:
+                raise RuntimeError(
+                    "Adapter sanity check failed: too many non-adapter trainable params.\n"
+                    f"- adapter_type={adapter_type}\n"
+                    f"- non_adapter_trainable_params={extra_trainable}\n"
+                    "This suggests unintended unfreezing outside the adapters.\n"
+                    "Set LOCAL_LORA_SKIP_ADAPTER_SANITY_CHECK=1 to bypass (not recommended)."
+                )
+
     wandb_run = None
     if wandb_mode != "disabled" and is_main:
         try:
@@ -482,7 +559,7 @@ def run_glue_task(
             "bf16": bool(bf16),
             "fp16": bool(fp16),
             "target_suffixes": list(target_suffixes),
-            "trainable_param_summary": trainable_param_summary(model),
+            "trainable_param_summary": trainable_param_summary(_unwrap_model_for_adapters(model)),
             "injection_report": asdict(injection_report) if injection_report is not None else None,
         }
 
@@ -512,7 +589,7 @@ def run_glue_task(
             all_metrics[split] = cleaned
 
         if is_main:
-            adapter_sd = adapter_state_dict(model)
+            adapter_sd = adapter_state_dict(_unwrap_model_for_adapters(model))
             torch.save(adapter_sd, out_dir / "adapter.pt")
 
         cfg = {
@@ -546,7 +623,7 @@ def run_glue_task(
             "fp16": bool(fp16),
             "target_suffixes": list(target_suffixes),
             "train_time_s": float(train_time_s),
-            "trainable_param_summary": trainable_param_summary(model),
+            "trainable_param_summary": trainable_param_summary(_unwrap_model_for_adapters(model)),
             "injection_report": asdict(injection_report) if injection_report is not None else None,
         }
         if is_main:

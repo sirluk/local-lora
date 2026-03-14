@@ -164,6 +164,17 @@ def main() -> None:
     if bad_scaling:
         raise ValueError(f"Invalid scaling_modes: {bad_scaling}. Valid: ['standard', 'rs'].")
 
+    if args.alpha is None and len(scaling_modes) > 1:
+        # With the current defaults in local_lora.glue.run_glue_task:
+        # - standard: alpha defaults to r, scaling = alpha/r = 1
+        # - rs: alpha defaults to sqrt(r), scaling = alpha/sqrt(r) = 1
+        # So sweeping scaling_modes without an explicit alpha is (almost) a no-op.
+        print(
+            "WARNING: sweeping --scaling_modes with --alpha unset. With current defaults this makes the effective "
+            "LoRA scaling ~1.0 for both 'standard' and 'rs', so the sweep is likely redundant. "
+            "If you want to compare scaling modes, set --alpha explicitly (same alpha across modes) or drop one mode."
+        )
+
     methods_raw = split_csv(args.methods)
     expanded: set[str] = set()
     for m in methods_raw:
