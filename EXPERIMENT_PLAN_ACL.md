@@ -63,6 +63,43 @@ conda run -n torch210 python train_glue.py \
 ## Stage 1 — Protocol lock sweep (1B only, seed=0)
 Tasks: `{sst2, mrpc, rte, cola}`.
 
+### Critical: adapter-only runs (fixed; re-run adapters)
+**Bug:** older adapter runs were not truly adapter-only. `unfreeze_adapter_params()` previously recursed into the wrapped
+`module.base` `nn.Linear` and unintentionally unfroze the original projection weights. This invalidates Stage‑1 adapter
+comparisons (LoRA vs Group‑Local vs BD‑LoRA) in `wandb_stage1/`.
+
+**Fix + guardrail:**
+- `local_lora/inject.py`: only unfreezes adapter parameters via `named_parameters(recurse=False)`.
+- `local_lora/glue.py`: fail-fast sanity check for adapter methods:
+  - `trainable_param_summary.adapter_trainable_params == injection_report.adapter_params_total`, and
+  - only (adapters + classification head) are trainable.
+  - Can bypass with `LOCAL_LORA_SKIP_ADAPTER_SANITY_CHECK=1` (not recommended).
+
+**Re-run (adapters only; re-use baselines):** keep `head_only` + `full_ft` from `wandb_stage1/`, but re-run the adapter
+methods into a fresh W&B offline export (e.g. `wandb_stage1_new/`) using:
+
+```bash
+DRY_RUN=1 VARIANT=attn_only bash slurm/leonardo/launch_acl_protocol_lock_split_adapters_only.sh
+VARIANT=attn_only JOB_TIME=1-00:00:00 bash slurm/leonardo/launch_acl_protocol_lock_split_adapters_only.sh
+```
+
+**Analyze adapter reruns (offline W&B parser):**
+```bash
+python report_stage1_wandb.py \
+  --wandb_dir wandb_stage1_new \
+  --out_dir reports/stage1_new \
+  --tasks sst2,mrpc,rte,cola \
+  --seed 0
+```
+
+Outputs:
+- `reports/stage1_new/stage1_report.md` (includes “Sanity Check (Trainable Params)” — ratios should be ~1 and no WARN)
+- `reports/stage1_new/stage1_runs.csv`
+- `reports/stage1_new/stage1_report.summary.json`
+
+Optional: if you want one combined report including baselines, create a combined directory containing `head_only` +
+`full_ft` runs from `wandb_stage1/` plus adapter runs from `wandb_stage1_new/`, then point `--wandb_dir` at that folder.
+
 Leonardo:
 - attention-only: `sbatch slurm/leonardo/leonardo_acl_protocol_lock_attn_only_ddp_1n4g.sh`
 - attention+mlp: `sbatch slurm/leonardo/leonardo_acl_protocol_lock_attn_mlp_ddp_1n4g.sh`
@@ -122,7 +159,8 @@ Grid (shared where applicable):
 - Full-FT LR: `{5e-6, 1e-5, 2e-5}`
 - `max_length ∈ {128, 256}`
 - `warmup_ratio ∈ {0.0, 0.05}`
-- `scaling_mode ∈ {standard, rs}` (compare once; pick default globally)
+- `scaling_mode ∈ {standard, rs}` (compare once; pick default globally; note: if `--alpha` is unset, the defaults make
+  effective scaling ~1.0 in both modes, so sweeping scaling modes is likely redundant)
 - Adapter targets:
   - attention-only: `q_proj,v_proj`
   - attention+mlp: `q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj`

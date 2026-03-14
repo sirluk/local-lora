@@ -1,0 +1,67 @@
+{
+  "best_bd_lora": [
+    {
+      "avg_score": 0.7715680495574091,
+      "n": 4,
+      "task_scores": {
+        "cola": 0.5557831485240768,
+        "mrpc": 0.8525131943748538,
+        "rte": 0.7364620938628159,
+        "sst2": 0.9415137614678899
+      }
+    },
+    {
+      "avg_score": 0.7409162197583142,
+      "n": 8,
+      "task_scores": {
+        "cola": 0.5531750685127235,
+        "mrpc": 0.8417942519473542,
+        "rte": 0.631768953068592,
+        "sst2": 0.9369266055045872
+      }
+    }
+  ],
+  "best_full_ft": null,
+  "best_group_local_equal": {
+    "avg_score": 0.8110905367127934,
+    "m": 16,
+    "r": 16,
+    "task_scores": {
+      "cola": 0.611018152576127,
+      "mrpc": 0.8787485582468282,
+      "rte": 0.8050541516245487,
+      "sst2": 0.9495412844036697
+    }
+  },
+  "best_group_local_param": {
+    "avg_score": 0.8101880096369811,
+    "m": 16,
+    "r": 16,
+    "task_scores": {
+      "cola": 0.611018152576127,
+      "mrpc": 0.8787485582468282,
+      "rte": 0.8014440433212996,
+      "sst2": 0.9495412844036697
+    }
+  },
+  "chosen_recipe": {
+    "avg_score": 0.8124766089843269,
+    "learning_rate": 0.0001,
+    "max_length": 256,
+    "scaling_mode": "rs",
+    "target_set": "attn_only",
+    "task_scores": {
+      "cola": 0.6181674636002474,
+      "mrpc": 0.8807536446120909,
+      "rte": 0.8014440433212996,
+      "sst2": 0.9495412844036697
+    },
+    "warmup_ratio": 0.05
+  },
+  "chosen_target_set": "attn_only",
+  "paths": {
+    "report_md": "reports/stage1_new/stage1_report.md",
+    "runs_csv": "reports/stage1_new/stage1_runs.csv",
+    "summary_json": "reports/stage1_new/stage1_report.summary.json"
+  }
+}

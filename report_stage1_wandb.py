@@ -490,6 +490,7 @@ def build_report(
     tasks: Sequence[str],
     runs_csv: Path,
     out_path: Path,
+    wandb_dir: Path,
 ) -> Dict[str, Any]:
     tasks_l = [t.lower() for t in tasks]
     tasks_required = len(tasks_l)
@@ -614,7 +615,10 @@ def build_report(
     lines: List[str] = []
     lines.append("# Stage 1 Report (W&B offline logs)")
     lines.append("")
-    lines.append("This report summarizes Stage 1 (protocol lock sweep) using the offline W&B run files under `wandb_stage1/`.")
+    lines.append(
+        "This report summarizes Stage 1 (protocol lock sweep) using the offline W&B run files under "
+        f"`{str(wandb_dir)}/`."
+    )
     lines.append("")
     lines.append("## Scope")
     lines.append(f"- Tasks: {', '.join(tasks_l)}")
@@ -1006,7 +1010,14 @@ def main() -> None:
 
     summaries = summarize_configs(rows, tasks=tasks)
     report_path = out_dir / "stage1_report.md"
-    summary_obj = build_report(runs=rows, summaries=summaries, tasks=tasks, runs_csv=runs_csv, out_path=report_path)
+    summary_obj = build_report(
+        runs=rows,
+        summaries=summaries,
+        tasks=tasks,
+        runs_csv=runs_csv,
+        out_path=report_path,
+        wandb_dir=wandb_dir,
+    )
     (report_path.with_suffix(".summary.json")).write_text(json.dumps(summary_obj, indent=2, sort_keys=True) + "\n")
 
     print(json.dumps(summary_obj, indent=2, sort_keys=True))
