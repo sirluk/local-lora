@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import json
+import math
+import os
 import time
 from pathlib import Path
 
@@ -147,6 +150,36 @@ def main() -> None:
         torch_compile_mode=args.torch_compile_mode,
     )
 
+    def is_global_rank_zero() -> bool:
+        # torchrun sets RANK; fall back to SLURM_PROCID when present.
+        for k in ("RANK", "SLURM_PROCID"):
+            v = os.environ.get(k)
+            if v is None:
+                continue
+            try:
+                return int(v) == 0
+            except Exception:
+                pass
+        return True
+
+    def env_flag(name: str, default: str = "1") -> bool:
+        v = os.environ.get(name, default).strip().lower()
+        return v not in {"0", "false", "no", "off", ""}
+
+    print_run_config = env_flag("LOCAL_LORA_PRINT_RUN_CONFIG", "1") and is_global_rank_zero()
+
+    def fmt_alpha(r: int, scaling_mode: str) -> float:
+        if args.alpha is not None:
+            return float(args.alpha)
+        return float(r) if scaling_mode == "standard" else float(math.sqrt(float(r)))
+
+    def log_event(event: str, payload: dict) -> None:
+        if not print_run_config:
+            return
+        out = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "event": event}
+        out.update(payload)
+        print(json.dumps(out, sort_keys=True), flush=True)
+
     model_names = split_csv(args.model_names) if args.model_names else [args.model_name]
     seeds = [int(x) for x in split_csv(args.seeds)] if args.seeds else [int(args.seed)]
 
@@ -209,6 +242,35 @@ def main() -> None:
     if args.wandb_mode != "disabled" and wandb_group is None:
         wandb_group = f"glue_suite_{ts}"
 
+    log_event(
+        "suite_start",
+        {
+            "output_root": str(out_root),
+            "results_csv": str(results_csv),
+            "run_tag": str(run_tag),
+            "model_names": list(model_names),
+            "tasks": list(tasks),
+            "seeds": list(seeds),
+            "methods": str(args.methods),
+            "learning_rates": list(learning_rates),
+            "full_ft_learning_rates": list(full_ft_learning_rates),
+            "max_lengths": list(max_lengths),
+            "warmup_ratios": list(warmup_ratios),
+            "scaling_modes": list(scaling_modes),
+            "target_suffixes": list(target_suffixes),
+            "grouping_mode": str(args.grouping_mode),
+            "perm_seed": args.perm_seed,
+            "bd_n_values": list(bd_n_values),
+            "bd_row_factor": str(args.bd_row_factor),
+            "m_values": list(m_values),
+            "wandb_mode": str(args.wandb_mode),
+            "wandb_group": str(wandb_group) if wandb_group is not None else None,
+            "torch_compile": bool(args.torch_compile),
+            "torch_compile_backend": args.torch_compile_backend,
+            "torch_compile_mode": args.torch_compile_mode,
+        },
+    )
+
     def model_tag(model_name: str) -> str:
         p = Path(model_name)
         if p.exists():
@@ -249,6 +311,165 @@ def main() -> None:
             sum_d_out = sum(s["d_out"] for s in shapes)
             d_out_list = [s["d_out"] for s in shapes]
 
+        def run_one(
+            *,
+            task: str,
+            seed: int,
+            max_length: int,
+            warmup_ratio: float,
+            scaling_mode: str,
+            lr: float,
+            adapter_type: str,
+            method_tag: str,
+            r: int,
+            m: int | None,
+            bd_n: int | None,
+            bd_row_factor: str,
+            group_local_delta: int | None = None,
+        ) -> None:
+            output_dir = make_out_dir(
+                model_name=model_name,
+                task=task,
+                method_tag=method_tag,
+                seed=seed,
+                lr=lr,
+                max_length=max_length,
+                warmup_ratio=warmup_ratio,
+                scaling_mode=scaling_mode,
+            )
+
+            log_event(
+                "run_start",
+                {
+                    "model_name": model_name,
+                    "task": task,
+                    "seed": int(seed),
+                    "adapter_type": adapter_type,
+                    "method_tag": method_tag,
+                    "r": int(r),
+                    "m": None if m is None else int(m),
+                    "n": None if bd_n is None else int(bd_n),
+                    "group_local_delta": None if group_local_delta is None else int(group_local_delta),
+                    "bd_row_factor": bd_row_factor if adapter_type == "bd_lora" else None,
+                    "scaling_mode": scaling_mode,
+                    "alpha": fmt_alpha(int(r), scaling_mode),
+                    "dropout": float(args.dropout),
+                    "lr": float(lr),
+                    "max_length": int(max_length),
+                    "warmup_ratio": float(warmup_ratio),
+                    "per_device_train_batch_size": int(args.per_device_train_batch_size),
+                    "per_device_eval_batch_size": int(args.per_device_eval_batch_size),
+                    "gradient_accumulation_steps": int(args.gradient_accumulation_steps),
+                    "max_train_samples": args.max_train_samples,
+                    "max_eval_samples": args.max_eval_samples,
+                    "bf16": bool(args.bf16),
+                    "fp16": bool(args.fp16),
+                    "target_suffixes": list(target_suffixes),
+                    "grouping_mode": str(args.grouping_mode),
+                    "perm_seed": args.perm_seed,
+                    "torch_compile": bool(args.torch_compile),
+                    "output_dir": output_dir,
+                    "wandb_mode": str(args.wandb_mode),
+                },
+            )
+
+            result = run_glue_task(
+                model_name=model_name,
+                task=task,
+                output_dir=output_dir,
+                adapter_type=adapter_type,
+                r=r,
+                m=m,
+                alpha=args.alpha,
+                dropout=args.dropout,
+                scaling_mode=scaling_mode,
+                grouping_mode=args.grouping_mode,
+                perm_seed=args.perm_seed,
+                bd_n=bd_n,
+                bd_row_factor=bd_row_factor,
+                max_length=max_length,
+                learning_rate=lr,
+                num_train_epochs=args.num_train_epochs,
+                per_device_train_batch_size=args.per_device_train_batch_size,
+                per_device_eval_batch_size=args.per_device_eval_batch_size,
+                gradient_accumulation_steps=args.gradient_accumulation_steps,
+                weight_decay=args.weight_decay,
+                warmup_ratio=warmup_ratio,
+                seed=seed,
+                max_train_samples=args.max_train_samples,
+                max_eval_samples=args.max_eval_samples,
+                bf16=args.bf16,
+                fp16=args.fp16,
+                results_csv=results_csv,
+                wandb_mode=args.wandb_mode,
+                wandb_entity=args.wandb_entity,
+                wandb_project=args.wandb_project,
+                wandb_name=None,
+                wandb_group=wandb_group,
+                wandb_tags=wandb_tags,
+                **compile_kwargs,
+                target_suffixes=target_suffixes,
+            )
+
+            cfg = (result or {}).get("config", {})
+            tps = cfg.get("trainable_param_summary") or {}
+            inj = cfg.get("injection_report") or {}
+            injected = inj.get("injected") if isinstance(inj, dict) else None
+            injected_adapter_params = None
+            injected_layers = None
+            if isinstance(injected, list):
+                injected_layers = len(injected)
+                try:
+                    injected_adapter_params = sum(int(x.get("adapter_params", 0)) for x in injected if isinstance(x, dict))
+                except Exception:
+                    injected_adapter_params = None
+
+            trainable_params = tps.get("trainable_params")
+            adapter_trainable_params = tps.get("adapter_trainable_params")
+            non_adapter_trainable_params = None
+            try:
+                if trainable_params is not None and adapter_trainable_params is not None:
+                    non_adapter_trainable_params = int(trainable_params) - int(adapter_trainable_params)
+            except Exception:
+                non_adapter_trainable_params = None
+
+            adapter_trainable_to_injected_ratio = None
+            try:
+                if (
+                    injected_adapter_params is not None
+                    and int(injected_adapter_params) > 0
+                    and adapter_trainable_params is not None
+                ):
+                    adapter_trainable_to_injected_ratio = float(int(adapter_trainable_params)) / float(
+                        int(injected_adapter_params)
+                    )
+            except Exception:
+                adapter_trainable_to_injected_ratio = None
+
+            split_scores = {}
+            metrics = (result or {}).get("metrics", {}) or {}
+            if isinstance(metrics, dict):
+                for split, md in metrics.items():
+                    if isinstance(md, dict) and "score" in md:
+                        split_scores[str(split)] = float(md["score"])
+
+            log_event(
+                "run_end",
+                {
+                    "output_dir": cfg.get("output_dir", output_dir),
+                    "adapter_type": adapter_type,
+                    "method_tag": method_tag,
+                    "train_time_s": cfg.get("train_time_s"),
+                    "trainable_params": trainable_params,
+                    "adapter_trainable_params": adapter_trainable_params,
+                    "non_adapter_trainable_params": non_adapter_trainable_params,
+                    "injected_layers": injected_layers,
+                    "injected_adapter_params": injected_adapter_params,
+                    "adapter_trainable_to_injected_ratio": adapter_trainable_to_injected_ratio,
+                    "score_by_split": split_scores,
+                },
+            )
+
         for task in tasks:
             for seed in seeds:
                 for max_length in max_lengths:
@@ -257,249 +478,89 @@ def main() -> None:
                             # Avoid redundant sweeps for non-LoRA baselines.
                             if run_head_only and scaling_mode == scaling_modes[0]:
                                 for lr in learning_rates:
-                                    run_glue_task(
-                                        model_name=model_name,
+                                    run_one(
                                         task=task,
-                                        output_dir=make_out_dir(
-                                            model_name=model_name,
-                                            task=task,
-                                            method_tag="head_only",
-                                            seed=seed,
-                                            lr=lr,
-                                            max_length=max_length,
-                                            warmup_ratio=warmup_ratio,
-                                            scaling_mode=scaling_modes[0],
-                                        ),
+                                        seed=seed,
+                                        max_length=max_length,
+                                        warmup_ratio=warmup_ratio,
+                                        scaling_mode=scaling_modes[0],
+                                        lr=lr,
                                         adapter_type="head_only",
+                                        method_tag="head_only",
                                         r=args.r_base,
                                         m=None,
-                                        alpha=args.alpha,
-                                        dropout=args.dropout,
-                                        scaling_mode=scaling_modes[0],
-                                        grouping_mode=args.grouping_mode,
-                                        perm_seed=args.perm_seed,
                                         bd_n=None,
                                         bd_row_factor=args.bd_row_factor,
-                                        max_length=max_length,
-                                        learning_rate=lr,
-                                        num_train_epochs=args.num_train_epochs,
-                                        per_device_train_batch_size=args.per_device_train_batch_size,
-                                        per_device_eval_batch_size=args.per_device_eval_batch_size,
-                                        gradient_accumulation_steps=args.gradient_accumulation_steps,
-                                        weight_decay=args.weight_decay,
-                                        warmup_ratio=warmup_ratio,
-                                        seed=seed,
-                                        max_train_samples=args.max_train_samples,
-                                        max_eval_samples=args.max_eval_samples,
-                                        bf16=args.bf16,
-                                        fp16=args.fp16,
-                                        results_csv=results_csv,
-                                        wandb_mode=args.wandb_mode,
-                                        wandb_entity=args.wandb_entity,
-                                        wandb_project=args.wandb_project,
-                                        wandb_name=None,
-                                        wandb_group=wandb_group,
-                                        wandb_tags=wandb_tags,
-                                        **compile_kwargs,
-                                        target_suffixes=target_suffixes,
                                     )
 
                             if run_full_ft and scaling_mode == scaling_modes[0]:
                                 for lr in full_ft_learning_rates:
-                                    run_glue_task(
-                                        model_name=model_name,
+                                    run_one(
                                         task=task,
-                                        output_dir=make_out_dir(
-                                            model_name=model_name,
-                                            task=task,
-                                            method_tag="full_ft",
-                                            seed=seed,
-                                            lr=lr,
-                                            max_length=max_length,
-                                            warmup_ratio=warmup_ratio,
-                                            scaling_mode=scaling_modes[0],
-                                        ),
+                                        seed=seed,
+                                        max_length=max_length,
+                                        warmup_ratio=warmup_ratio,
+                                        scaling_mode=scaling_modes[0],
+                                        lr=lr,
                                         adapter_type="full_ft",
+                                        method_tag="full_ft",
                                         r=args.r_base,
                                         m=None,
-                                        alpha=args.alpha,
-                                        dropout=args.dropout,
-                                        scaling_mode=scaling_modes[0],
-                                        grouping_mode=args.grouping_mode,
-                                        perm_seed=args.perm_seed,
                                         bd_n=None,
                                         bd_row_factor=args.bd_row_factor,
-                                        max_length=max_length,
-                                        learning_rate=lr,
-                                        num_train_epochs=args.num_train_epochs,
-                                        per_device_train_batch_size=args.per_device_train_batch_size,
-                                        per_device_eval_batch_size=args.per_device_eval_batch_size,
-                                        gradient_accumulation_steps=args.gradient_accumulation_steps,
-                                        weight_decay=args.weight_decay,
-                                        warmup_ratio=warmup_ratio,
-                                        seed=seed,
-                                        max_train_samples=args.max_train_samples,
-                                        max_eval_samples=args.max_eval_samples,
-                                        bf16=args.bf16,
-                                        fp16=args.fp16,
-                                        results_csv=results_csv,
-                                        wandb_mode=args.wandb_mode,
-                                        wandb_entity=args.wandb_entity,
-                                        wandb_project=args.wandb_project,
-                                        wandb_name=None,
-                                        wandb_group=wandb_group,
-                                        wandb_tags=wandb_tags,
-                                        **compile_kwargs,
-                                        target_suffixes=target_suffixes,
                                     )
 
                             if run_vanilla:
                                 for lr in learning_rates:
-                                    run_glue_task(
-                                        model_name=model_name,
+                                    run_one(
                                         task=task,
-                                        output_dir=make_out_dir(
-                                            model_name=model_name,
-                                            task=task,
-                                            method_tag=f"vanilla_lora_r{args.r_base}",
-                                            seed=seed,
-                                            lr=lr,
-                                            max_length=max_length,
-                                            warmup_ratio=warmup_ratio,
-                                            scaling_mode=scaling_mode,
-                                        ),
+                                        seed=seed,
+                                        max_length=max_length,
+                                        warmup_ratio=warmup_ratio,
+                                        scaling_mode=scaling_mode,
+                                        lr=lr,
                                         adapter_type="vanilla_lora",
+                                        method_tag=f"vanilla_lora_r{args.r_base}",
                                         r=args.r_base,
                                         m=None,
-                                        alpha=args.alpha,
-                                        dropout=args.dropout,
-                                        scaling_mode=scaling_mode,
-                                        grouping_mode=args.grouping_mode,
-                                        perm_seed=args.perm_seed,
                                         bd_n=None,
                                         bd_row_factor=args.bd_row_factor,
-                                        max_length=max_length,
-                                        learning_rate=lr,
-                                        num_train_epochs=args.num_train_epochs,
-                                        per_device_train_batch_size=args.per_device_train_batch_size,
-                                        per_device_eval_batch_size=args.per_device_eval_batch_size,
-                                        gradient_accumulation_steps=args.gradient_accumulation_steps,
-                                        weight_decay=args.weight_decay,
-                                        warmup_ratio=warmup_ratio,
-                                        seed=seed,
-                                        max_train_samples=args.max_train_samples,
-                                        max_eval_samples=args.max_eval_samples,
-                                        bf16=args.bf16,
-                                        fp16=args.fp16,
-                                        results_csv=results_csv,
-                                        wandb_mode=args.wandb_mode,
-                                        wandb_entity=args.wandb_entity,
-                                        wandb_project=args.wandb_project,
-                                        wandb_name=None,
-                                        wandb_group=wandb_group,
-                                        wandb_tags=wandb_tags,
-                                        **compile_kwargs,
-                                        target_suffixes=target_suffixes,
                                     )
 
                             if run_bd_lora:
                                 for n in bd_n_values:
                                     for lr in learning_rates:
-                                        run_glue_task(
-                                            model_name=model_name,
+                                        run_one(
                                             task=task,
-                                            output_dir=make_out_dir(
-                                                model_name=model_name,
-                                                task=task,
-                                                method_tag=f"bd_lora_r{args.r_base}_n{n}_row{args.bd_row_factor}",
-                                                seed=seed,
-                                                lr=lr,
-                                                max_length=max_length,
-                                                warmup_ratio=warmup_ratio,
-                                                scaling_mode=scaling_mode,
-                                            ),
+                                            seed=seed,
+                                            max_length=max_length,
+                                            warmup_ratio=warmup_ratio,
+                                            scaling_mode=scaling_mode,
+                                            lr=lr,
                                             adapter_type="bd_lora",
+                                            method_tag=f"bd_lora_r{args.r_base}_n{n}_row{args.bd_row_factor}",
                                             r=args.r_base,
                                             m=None,
-                                            alpha=args.alpha,
-                                            dropout=args.dropout,
-                                            scaling_mode=scaling_mode,
-                                            grouping_mode=args.grouping_mode,
-                                            perm_seed=args.perm_seed,
                                             bd_n=n,
                                             bd_row_factor=args.bd_row_factor,
-                                            max_length=max_length,
-                                            learning_rate=lr,
-                                            num_train_epochs=args.num_train_epochs,
-                                            per_device_train_batch_size=args.per_device_train_batch_size,
-                                            per_device_eval_batch_size=args.per_device_eval_batch_size,
-                                            gradient_accumulation_steps=args.gradient_accumulation_steps,
-                                            weight_decay=args.weight_decay,
-                                            warmup_ratio=warmup_ratio,
-                                            seed=seed,
-                                            max_train_samples=args.max_train_samples,
-                                            max_eval_samples=args.max_eval_samples,
-                                            bf16=args.bf16,
-                                            fp16=args.fp16,
-                                            results_csv=results_csv,
-                                            wandb_mode=args.wandb_mode,
-                                            wandb_entity=args.wandb_entity,
-                                            wandb_project=args.wandb_project,
-                                            wandb_name=None,
-                                            wandb_group=wandb_group,
-                                            wandb_tags=wandb_tags,
-                                            **compile_kwargs,
-                                            target_suffixes=target_suffixes,
                                         )
 
                             if run_group_local_equal:
                                 for m in m_values:
                                     for lr in learning_rates:
-                                        run_glue_task(
-                                            model_name=model_name,
+                                        run_one(
                                             task=task,
-                                            output_dir=make_out_dir(
-                                                model_name=model_name,
-                                                task=task,
-                                                method_tag=f"group_local_equal_r{args.r_base}_m{m}",
-                                                seed=seed,
-                                                lr=lr,
-                                                max_length=max_length,
-                                                warmup_ratio=warmup_ratio,
-                                                scaling_mode=scaling_mode,
-                                            ),
+                                            seed=seed,
+                                            max_length=max_length,
+                                            warmup_ratio=warmup_ratio,
+                                            scaling_mode=scaling_mode,
+                                            lr=lr,
                                             adapter_type="group_local",
+                                            method_tag=f"group_local_equal_r{args.r_base}_m{m}",
                                             r=args.r_base,
                                             m=m,
-                                            alpha=args.alpha,
-                                            dropout=args.dropout,
-                                            scaling_mode=scaling_mode,
-                                            grouping_mode=args.grouping_mode,
-                                            perm_seed=args.perm_seed,
                                             bd_n=None,
                                             bd_row_factor=args.bd_row_factor,
-                                            max_length=max_length,
-                                            learning_rate=lr,
-                                            num_train_epochs=args.num_train_epochs,
-                                            per_device_train_batch_size=args.per_device_train_batch_size,
-                                            per_device_eval_batch_size=args.per_device_eval_batch_size,
-                                            gradient_accumulation_steps=args.gradient_accumulation_steps,
-                                            weight_decay=args.weight_decay,
-                                            warmup_ratio=warmup_ratio,
-                                            seed=seed,
-                                            max_train_samples=args.max_train_samples,
-                                            max_eval_samples=args.max_eval_samples,
-                                            bf16=args.bf16,
-                                            fp16=args.fp16,
-                                            results_csv=results_csv,
-                                            wandb_mode=args.wandb_mode,
-                                            wandb_entity=args.wandb_entity,
-                                            wandb_project=args.wandb_project,
-                                            wandb_name=None,
-                                            wandb_group=wandb_group,
-                                            wandb_tags=wandb_tags,
-                                            **compile_kwargs,
-                                            target_suffixes=target_suffixes,
                                         )
 
                             if run_group_local_param:
@@ -515,52 +576,23 @@ def main() -> None:
                                         max_r=args.max_r_search,
                                     )
                                     for lr in learning_rates:
-                                        run_glue_task(
-                                            model_name=model_name,
+                                        run_one(
                                             task=task,
-                                            output_dir=make_out_dir(
-                                                model_name=model_name,
-                                                task=task,
-                                                method_tag=f"group_local_param_r{r_match}_m{m}_d{delta}",
-                                                seed=seed,
-                                                lr=lr,
-                                                max_length=max_length,
-                                                warmup_ratio=warmup_ratio,
-                                                scaling_mode=scaling_mode,
-                                            ),
+                                            seed=seed,
+                                            max_length=max_length,
+                                            warmup_ratio=warmup_ratio,
+                                            scaling_mode=scaling_mode,
+                                            lr=lr,
                                             adapter_type="group_local",
+                                            method_tag=f"group_local_param_r{r_match}_m{m}_d{delta}",
                                             r=r_match,
                                             m=m,
-                                            alpha=args.alpha,
-                                            dropout=args.dropout,
-                                            scaling_mode=scaling_mode,
-                                            grouping_mode=args.grouping_mode,
-                                            perm_seed=args.perm_seed,
                                             bd_n=None,
                                             bd_row_factor=args.bd_row_factor,
-                                            max_length=max_length,
-                                            learning_rate=lr,
-                                            num_train_epochs=args.num_train_epochs,
-                                            per_device_train_batch_size=args.per_device_train_batch_size,
-                                            per_device_eval_batch_size=args.per_device_eval_batch_size,
-                                            gradient_accumulation_steps=args.gradient_accumulation_steps,
-                                            weight_decay=args.weight_decay,
-                                            warmup_ratio=warmup_ratio,
-                                            seed=seed,
-                                            max_train_samples=args.max_train_samples,
-                                            max_eval_samples=args.max_eval_samples,
-                                            bf16=args.bf16,
-                                            fp16=args.fp16,
-                                            results_csv=results_csv,
-                                            wandb_mode=args.wandb_mode,
-                                            wandb_entity=args.wandb_entity,
-                                            wandb_project=args.wandb_project,
-                                            wandb_name=None,
-                                            wandb_group=wandb_group,
-                                            wandb_tags=wandb_tags,
-                                            **compile_kwargs,
-                                            target_suffixes=target_suffixes,
+                                            group_local_delta=delta,
                                         )
+
+    log_event("suite_end", {"status": "ok"})
 
 
 if __name__ == "__main__":
