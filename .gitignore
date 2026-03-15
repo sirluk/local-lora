@@ -5,6 +5,7 @@ __pycache__/
 .cache/
 .ruff_cache/
 .mypy_cache/
+.DS_Store
 
 # HF / datasets caches (optional)
 hf_cache/
