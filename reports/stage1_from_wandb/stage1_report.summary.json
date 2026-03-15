@@ -1,0 +1,13 @@
+{
+  "best_bd_lora": [],
+  "best_full_ft": null,
+  "best_group_local_equal": null,
+  "best_group_local_param": null,
+  "chosen_recipe": null,
+  "chosen_target_set": "unknown",
+  "paths": {
+    "report_md": "reports/stage1_from_wandb/stage1_report.md",
+    "runs_csv": "reports/stage1_from_wandb/stage1_runs.csv",
+    "summary_json": "reports/stage1_from_wandb/stage1_report.summary.json"
+  }
+}
