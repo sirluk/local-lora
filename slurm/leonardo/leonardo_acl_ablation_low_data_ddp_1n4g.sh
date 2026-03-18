@@ -92,6 +92,8 @@ SCALING_MODE="${SCALING_MODE:-standard}"
 
 TARGET_SUFFIXES="${TARGET_SUFFIXES:-q_proj,k_proj,v_proj,o_proj}"
 M_VALUES="${M_VALUES:-16,4}"
+GROUP_LOCAL_EQUAL_M_VALUES="${GROUP_LOCAL_EQUAL_M_VALUES:-$M_VALUES}"
+GROUP_LOCAL_PARAM_M_VALUES="${GROUP_LOCAL_PARAM_M_VALUES:-$M_VALUES}"
 BD_N_VALUES="${BD_N_VALUES:-8}"
 BD_ROW_FACTOR="${BD_ROW_FACTOR:-block_a}"
 
@@ -136,6 +138,8 @@ for regime in ${DATA_REGIMES}; do
     --tasks "${TASKS}" \
     --methods full_ft,vanilla_lora,bd_lora,group_local_param \
     --m_values "${M_VALUES}" \
+    --group_local_equal_m_values "${GROUP_LOCAL_EQUAL_M_VALUES}" \
+    --group_local_param_m_values "${GROUP_LOCAL_PARAM_M_VALUES}" \
     --bd_n_values "${BD_N_VALUES}" \
     --bd_row_factor "${BD_ROW_FACTOR}" \
     --seeds "${SEEDS}" \

@@ -1,0 +1,51 @@
+{
+  "models": [
+    "Llama-3.2-1B-Instruct",
+    "Qwen3-4B-Instruct-2507"
+  ],
+  "parsed_run_files": 228,
+  "paths": {
+    "report_md": "reports/stage2/stage2_report.md"
+  },
+  "recipe_uniques": {
+    "grouping_mode": [
+      "contiguous"
+    ],
+    "learning_rate": [
+      2e-05,
+      0.0001
+    ],
+    "max_length": [
+      "128"
+    ],
+    "perm_seed": [
+      "None"
+    ],
+    "scaling_mode": [
+      "rs"
+    ],
+    "target_set": [
+      "attn_mlp"
+    ],
+    "warmup_ratio": [
+      "0.05"
+    ]
+  },
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "tasks": [
+    "cola",
+    "sst2",
+    "mrpc",
+    "qqp",
+    "stsb",
+    "mnli",
+    "qnli",
+    "rte",
+    "wnli"
+  ],
+  "wandb_dir": "wandb_stage2/wandb"
+}

@@ -94,7 +94,7 @@ submit_job() {
   local tag="final_${tag_model}_seed${seed}_${method_group}"
   local output_root="${OUTPUT_ROOT_BASE}/${tag}"
   local job_name="${JOB_NAME_PREFIX}-${tag}"
-  local export_spec="ALL,TASKS,MODEL_NAMES,SEEDS,OUTPUT_ROOT,METHODS,LORA_LR,FT_LR,MAX_LENGTH,WARMUP_RATIO,SCALING_MODE,TARGET_SUFFIXES,M_VALUES,BD_N_VALUES,BD_ROW_FACTOR"
+  local export_spec="ALL,TASKS,MODEL_NAMES,SEEDS,OUTPUT_ROOT,METHODS,LORA_LR,FT_LR,MAX_LENGTH,WARMUP_RATIO,SCALING_MODE,TARGET_SUFFIXES,M_VALUES,GROUP_LOCAL_EQUAL_M_VALUES,GROUP_LOCAL_PARAM_M_VALUES,BD_N_VALUES,BD_ROW_FACTOR"
   local -a sbatch_args=(
     --parsable
     --time "${JOB_TIME}"

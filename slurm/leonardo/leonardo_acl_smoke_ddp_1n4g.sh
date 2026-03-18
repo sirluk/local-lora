@@ -81,6 +81,9 @@ GRAD_ACCUM="${GRAD_ACCUM:-1}"
 # Keep it tiny
 MAX_TRAIN_SAMPLES="${MAX_TRAIN_SAMPLES:-2000}"
 MAX_EVAL_SAMPLES="${MAX_EVAL_SAMPLES:-1000}"
+M_VALUES="${M_VALUES:-16,8,4,2,1}"
+GROUP_LOCAL_EQUAL_M_VALUES="${GROUP_LOCAL_EQUAL_M_VALUES:-$M_VALUES}"
+GROUP_LOCAL_PARAM_M_VALUES="${GROUP_LOCAL_PARAM_M_VALUES:-$M_VALUES}"
 
 RUN_TAG_DEFAULT="${SLURM_JOBID:-interactive}_$(date +%Y%m%d_%H%M%S)"
 RUN_TAG="${RUN_TAG:-$RUN_TAG_DEFAULT}"
@@ -119,6 +122,9 @@ torchrun --standalone --nproc_per_node="${NPROC}" --master_port="${MASTER_PORT}"
   --max_lengths 128 \
   --warmup_ratios 0.0 \
   --scaling_modes standard \
+  --m_values "${M_VALUES}" \
+  --group_local_equal_m_values "${GROUP_LOCAL_EQUAL_M_VALUES}" \
+  --group_local_param_m_values "${GROUP_LOCAL_PARAM_M_VALUES}" \
   --bd_n_values 8 \
   --bd_row_factor block_a \
   --grouping_mode contiguous \

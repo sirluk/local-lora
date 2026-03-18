@@ -84,6 +84,8 @@ GRAD_ACCUM="${GRAD_ACCUM:-1}"
 R_BASE="${R_BASE:-16}"
 BD_N_VALUES="${BD_N_VALUES:-1,2,4,8,16}"
 M_VALUES="${M_VALUES:-16,8,4,2,1}"
+GROUP_LOCAL_EQUAL_M_VALUES="${GROUP_LOCAL_EQUAL_M_VALUES:-$M_VALUES}"
+GROUP_LOCAL_PARAM_M_VALUES="${GROUP_LOCAL_PARAM_M_VALUES:-$M_VALUES}"
 BD_ROW_FACTOR="${BD_ROW_FACTOR:-block_a}"
 
 # Fill these from Stage 1 selection:
@@ -127,6 +129,8 @@ torchrun --standalone --nproc_per_node="${NPROC}" --master_port="${MASTER_PORT}"
   --methods vanilla_lora,bd_lora,group_local_param \
   --r_base "${R_BASE}" \
   --m_values "${M_VALUES}" \
+  --group_local_equal_m_values "${GROUP_LOCAL_EQUAL_M_VALUES}" \
+  --group_local_param_m_values "${GROUP_LOCAL_PARAM_M_VALUES}" \
   --bd_n_values "${BD_N_VALUES}" \
   --bd_row_factor "${BD_ROW_FACTOR}" \
   --seeds "${SEEDS}" \

@@ -56,6 +56,8 @@ MAX_EVAL_SAMPLES="${MAX_EVAL_SAMPLES:-2000}"
 
 # Reduce m-grid by default for quicker feedback; override if you want the full sweep.
 M_VALUES="${M_VALUES:-16,4,1}"
+GROUP_LOCAL_EQUAL_M_VALUES="${GROUP_LOCAL_EQUAL_M_VALUES:-$M_VALUES}"
+GROUP_LOCAL_PARAM_M_VALUES="${GROUP_LOCAL_PARAM_M_VALUES:-$M_VALUES}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-runs/group_local_sampled_${SLURM_JOBID:-interactive}}"
 
 python -m unittest discover -s tests -p "test_*.py" -q
@@ -64,6 +66,8 @@ python run_glue_suite.py \
   --tasks "${TASKS}" \
   --methods head_only,group_local_equal,group_local_param \
   --m_values "${M_VALUES}" \
+  --group_local_equal_m_values "${GROUP_LOCAL_EQUAL_M_VALUES}" \
+  --group_local_param_m_values "${GROUP_LOCAL_PARAM_M_VALUES}" \
   --max_train_samples "${MAX_TRAIN_SAMPLES}" \
   --max_eval_samples "${MAX_EVAL_SAMPLES}" \
   --output_root "${OUTPUT_ROOT}" \

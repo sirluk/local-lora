@@ -43,7 +43,7 @@ submit_job() {
   local tag="grouping_$(sanitize_token "${grouping_mode}")"
   local output_root="${OUTPUT_ROOT_BASE}/${tag}"
   local job_name="${JOB_NAME_PREFIX}-${tag}"
-  local export_spec="ALL,OUTPUT_ROOT,GROUPING_MODES,PERM_SEED,LORA_LR,MAX_LENGTH,WARMUP_RATIO,SCALING_MODE,TARGET_SUFFIXES,M_VALUES,BD_N_VALUES,BD_ROW_FACTOR,METHODS"
+  local export_spec="ALL,OUTPUT_ROOT,GROUPING_MODES,PERM_SEED,LORA_LR,MAX_LENGTH,WARMUP_RATIO,SCALING_MODE,TARGET_SUFFIXES,M_VALUES,GROUP_LOCAL_EQUAL_M_VALUES,GROUP_LOCAL_PARAM_M_VALUES,BD_N_VALUES,BD_ROW_FACTOR,METHODS"
   local -a sbatch_args=(
     --parsable
     --time "${JOB_TIME}"

@@ -42,6 +42,18 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--r_base", type=int, default=16)
     p.add_argument("--m_values", type=str, default="16,8,4,2,1")
+    p.add_argument(
+        "--group_local_equal_m_values",
+        type=str,
+        default=None,
+        help="Optional comma-separated m values for group_local_equal (defaults to --m_values).",
+    )
+    p.add_argument(
+        "--group_local_param_m_values",
+        type=str,
+        default=None,
+        help="Optional comma-separated m values for group_local_param (defaults to --m_values).",
+    )
     p.add_argument("--bd_n_values", type=str, default="8,4", help="BD-LoRA block counts N to evaluate.")
     p.add_argument(
         "--bd_row_factor",
@@ -141,6 +153,16 @@ def main() -> None:
 
     tasks = split_csv(args.tasks)
     m_values = [int(x) for x in split_csv(args.m_values)]
+    group_local_equal_m_values = (
+        [int(x) for x in split_csv(args.group_local_equal_m_values)]
+        if args.group_local_equal_m_values
+        else list(m_values)
+    )
+    group_local_param_m_values = (
+        [int(x) for x in split_csv(args.group_local_param_m_values)]
+        if args.group_local_param_m_values
+        else list(m_values)
+    )
     bd_n_values = [int(x) for x in split_csv(args.bd_n_values)]
     target_suffixes = tuple(split_csv(args.target_suffixes))
     wandb_tags = tuple(split_csv(args.wandb_tags))
@@ -263,6 +285,8 @@ def main() -> None:
             "bd_n_values": list(bd_n_values),
             "bd_row_factor": str(args.bd_row_factor),
             "m_values": list(m_values),
+            "group_local_equal_m_values": list(group_local_equal_m_values),
+            "group_local_param_m_values": list(group_local_param_m_values),
             "wandb_mode": str(args.wandb_mode),
             "wandb_group": str(wandb_group) if wandb_group is not None else None,
             "torch_compile": bool(args.torch_compile),
@@ -546,7 +570,7 @@ def main() -> None:
                                         )
 
                             if run_group_local_equal:
-                                for m in m_values:
+                                for m in group_local_equal_m_values:
                                     for lr in learning_rates:
                                         run_one(
                                             task=task,
@@ -566,7 +590,7 @@ def main() -> None:
                             if run_group_local_param:
                                 if sum_d_in is None or sum_d_out is None or d_out_list is None:
                                     raise RuntimeError("Internal error: parameter-matched shapes not computed.")
-                                for m in m_values:
+                                for m in group_local_param_m_values:
                                     r_match, delta = find_parameter_matched_r(
                                         sum_d_in=sum_d_in,
                                         sum_d_out=sum_d_out,

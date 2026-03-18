@@ -62,6 +62,8 @@ export TORCH_COMPILE_MODE="${TORCH_COMPILE_MODE:-}"
 MODEL_NAME="${MODEL_NAME:-/leonardo_work/EUHPC_D31_132/models/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6}"
 TASKS="${TASKS:-cola,sst2,mrpc,rte}"
 M_VALUES="${M_VALUES:-16,8,4,2,1}"
+GROUP_LOCAL_EQUAL_M_VALUES="${GROUP_LOCAL_EQUAL_M_VALUES:-$M_VALUES}"
+GROUP_LOCAL_PARAM_M_VALUES="${GROUP_LOCAL_PARAM_M_VALUES:-$M_VALUES}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-runs/leonardo_group_local_quick_${SLURM_JOBID:-interactive}}"
 
 python -m unittest discover -s tests -p "test_*.py" -q
@@ -137,6 +139,8 @@ srun --ntasks=4 --ntasks-per-node=4 --gpus-per-task=1 --kill-on-bad-exit=1 \
       --tasks "${TASK_STR}" \
       --methods head_only,group_local_equal,group_local_param \
       --m_values "'"${M_VALUES}"'" \
+      --group_local_equal_m_values "'"${GROUP_LOCAL_EQUAL_M_VALUES}"'" \
+      --group_local_param_m_values "'"${GROUP_LOCAL_PARAM_M_VALUES}"'" \
       --output_root "'"${OUTPUT_ROOT}"'" \
       --results_csv "'"${OUTPUT_ROOT}"'/results_rank${RANK}.csv" \
       --wandb_mode "'"${WANDB_MODE_ARG}"'" \

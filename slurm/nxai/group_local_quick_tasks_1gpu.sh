@@ -54,6 +54,8 @@ WANDB_MODE_ARG="${WANDB_MODE_ARG:-online}"
 
 TASKS="${TASKS:-cola,sst2,mrpc,rte}"
 M_VALUES="${M_VALUES:-16,8,4,2,1}"
+GROUP_LOCAL_EQUAL_M_VALUES="${GROUP_LOCAL_EQUAL_M_VALUES:-$M_VALUES}"
+GROUP_LOCAL_PARAM_M_VALUES="${GROUP_LOCAL_PARAM_M_VALUES:-$M_VALUES}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-runs/group_local_quick_${SLURM_JOBID:-interactive}}"
 
 python -m unittest discover -s tests -p "test_*.py" -q
@@ -62,6 +64,8 @@ python run_glue_suite.py \
   --tasks "${TASKS}" \
   --methods head_only,group_local_equal,group_local_param \
   --m_values "${M_VALUES}" \
+  --group_local_equal_m_values "${GROUP_LOCAL_EQUAL_M_VALUES}" \
+  --group_local_param_m_values "${GROUP_LOCAL_PARAM_M_VALUES}" \
   --output_root "${OUTPUT_ROOT}" \
   --wandb_mode "${WANDB_MODE_ARG}" \
   --wandb_entity hauzenberger \

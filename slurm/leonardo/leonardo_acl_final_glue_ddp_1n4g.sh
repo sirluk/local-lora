@@ -103,7 +103,9 @@ SCALING_MODE="${SCALING_MODE:-standard}" # standard|rs
 
 # Chosen configs:
 TARGET_SUFFIXES="${TARGET_SUFFIXES:-q_proj,k_proj,v_proj,o_proj}"
-M_VALUES="${M_VALUES:-16,4}"        # top-1/2 m values from Stage 1
+M_VALUES="${M_VALUES:-16,4}"        # backward-compatible fallback if per-method m values are unset
+GROUP_LOCAL_EQUAL_M_VALUES="${GROUP_LOCAL_EQUAL_M_VALUES:-16}"
+GROUP_LOCAL_PARAM_M_VALUES="${GROUP_LOCAL_PARAM_M_VALUES:-4}"
 BD_N_VALUES="${BD_N_VALUES:-8}"     # choose 4 or 8 from Stage 1
 BD_ROW_FACTOR="${BD_ROW_FACTOR:-block_a}"
 
@@ -139,6 +141,8 @@ torchrun --standalone --nproc_per_node="${NPROC}" --master_port="${MASTER_PORT}"
   --tasks "${TASKS}" \
   --methods "${METHODS}" \
   --m_values "${M_VALUES}" \
+  --group_local_equal_m_values "${GROUP_LOCAL_EQUAL_M_VALUES}" \
+  --group_local_param_m_values "${GROUP_LOCAL_PARAM_M_VALUES}" \
   --bd_n_values "${BD_N_VALUES}" \
   --bd_row_factor "${BD_ROW_FACTOR}" \
   --seeds "${SEEDS}" \
