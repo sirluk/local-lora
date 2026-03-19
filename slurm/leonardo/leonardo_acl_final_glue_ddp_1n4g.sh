@@ -71,7 +71,7 @@ fi
 # Defaults (override via sbatch --export=ALL,VAR=...)
 MODEL_NAME_1B="${MODEL_NAME_1B:-/leonardo_work/EUHPC_D31_132/models/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6}"
 # Set this to a local snapshot path if running fully offline for 3B.
-MODEL_NAME_3B="${MODEL_NAME_3B:-}"
+MODEL_NAME_3B="${MODEL_NAME_3B:-/leonardo_work/EUHPC_D31_132/models/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/cdbee75f17c01a7cc42f958dc650907174af0554}"
 
 if [ -n "${MODEL_NAMES:-}" ]; then
   MODEL_NAMES_ARG="${MODEL_NAMES}"

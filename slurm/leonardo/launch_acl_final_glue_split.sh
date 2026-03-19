@@ -7,6 +7,7 @@
 # - one model per job
 # - one seed per job
 # - one method group per job
+# - configurable task chunks per job
 ###############################################################################
 
 set -euo pipefail
@@ -20,9 +21,10 @@ if [ ! -f "${BASE_SCRIPT}" ]; then
 fi
 
 MODEL_NAME_1B="${MODEL_NAME_1B:-/leonardo_work/EUHPC_D31_132/models/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6}"
-MODEL_NAME_3B="${MODEL_NAME_3B:-}"
+MODEL_NAME_3B="${MODEL_NAME_3B:-/leonardo_work/EUHPC_D31_132/models/models--Qwen--Qwen3-4B-Instruct-2507/snapshots/cdbee75f17c01a7cc42f958dc650907174af0554}"
 MODEL_NAMES="${MODEL_NAMES:-}"
 TASKS="${TASKS:-cola,sst2,mrpc,qqp,stsb,mnli,qnli,rte,wnli}"
+TASKS_PER_JOB="${TASKS_PER_JOB:-1}"
 SEEDS="${SEEDS:-0,1,2}"
 
 JOB_TIME="${JOB_TIME:-1-00:00:00}"
@@ -46,6 +48,41 @@ model_tag() {
   sanitize_token "${base_name}"
 }
 
+chunk_csv_items() {
+  local csv="$1"
+  local chunk_size="$2"
+
+  if ! [[ "${chunk_size}" =~ ^[0-9]+$ ]] || [ "${chunk_size}" -lt 1 ]; then
+    echo "TASKS_PER_JOB must be a positive integer; got '${chunk_size}'." >&2
+    return 1
+  fi
+
+  local -a items=()
+  IFS=, read -r -a items <<< "${csv}"
+
+  local -a chunk=()
+  local item=""
+  for item in "${items[@]}"; do
+    item="${item// /}"
+    [ -z "${item}" ] && continue
+    chunk+=("${item}")
+    if [ "${#chunk[@]}" -eq "${chunk_size}" ]; then
+      (
+        IFS=,
+        echo "${chunk[*]}"
+      )
+      chunk=()
+    fi
+  done
+
+  if [ "${#chunk[@]}" -gt 0 ]; then
+    (
+      IFS=,
+      echo "${chunk[*]}"
+    )
+  fi
+}
+
 count_enabled() {
   local flag="$1"
   if [ "${flag}" = "1" ]; then
@@ -64,13 +101,24 @@ else
   fi
 fi
 IFS=, read -r -a seeds <<< "${SEEDS}"
+task_chunks=()
+while IFS= read -r task_chunk; do
+  [ -n "${task_chunk}" ] && task_chunks+=("${task_chunk}")
+done < <(chunk_csv_items "${TASKS}" "${TASKS_PER_JOB}")
+
+if [ "${#task_chunks[@]}" -eq 0 ]; then
+  echo "No tasks resolved from TASKS='${TASKS}'." >&2
+  exit 1
+fi
 
 jobs_per_model_seed=$(( $(count_enabled "${SUBMIT_HEAD_ONLY}") + $(count_enabled "${SUBMIT_FULL_FT}") + $(count_enabled "${SUBMIT_ADAPTERS}") ))
-total_jobs=$(( ${#model_names[@]} * ${#seeds[@]} * jobs_per_model_seed ))
+total_jobs=$(( ${#model_names[@]} * ${#seeds[@]} * jobs_per_model_seed * ${#task_chunks[@]} ))
 
 echo "Submitting split final-GLUE sweep"
 echo "  base script    : ${BASE_SCRIPT}"
 echo "  tasks          : ${TASKS}"
+echo "  tasks/job      : ${TASKS_PER_JOB}"
+echo "  task chunks    : ${#task_chunks[@]}"
 echo "  output root    : ${OUTPUT_ROOT_BASE}"
 echo "  job time       : ${JOB_TIME}"
 if [ -n "${SBATCH_QOS}" ]; then
@@ -83,15 +131,19 @@ echo "  seeds          : ${#seeds[@]}"
 echo "  total jobs     : ${total_jobs}"
 
 submit_job() {
-  local method_group="$1"
-  local methods="$2"
-  local model_name="$3"
-  local seed="$4"
+  local task_chunk="$1"
+  local method_group="$2"
+  local methods="$3"
+  local model_name="$4"
+  local seed="$5"
+
+  local tag_tasks
+  tag_tasks="$(sanitize_token "${task_chunk}")"
 
   local tag_model
   tag_model="$(model_tag "${model_name}")"
 
-  local tag="final_${tag_model}_seed${seed}_${method_group}"
+  local tag="final_${tag_model}_seed${seed}_${tag_tasks}_${method_group}"
   local output_root="${OUTPUT_ROOT_BASE}/${tag}"
   local job_name="${JOB_NAME_PREFIX}-${tag}"
   local export_spec="ALL,TASKS,MODEL_NAMES,SEEDS,OUTPUT_ROOT,METHODS,LORA_LR,FT_LR,MAX_LENGTH,WARMUP_RATIO,SCALING_MODE,TARGET_SUFFIXES,M_VALUES,GROUP_LOCAL_EQUAL_M_VALUES,GROUP_LOCAL_PARAM_M_VALUES,BD_N_VALUES,BD_ROW_FACTOR"
@@ -108,13 +160,13 @@ submit_job() {
 
   if [ "${DRY_RUN}" = "1" ]; then
     echo "DRY_RUN sbatch ${sbatch_args[*]} ${BASE_SCRIPT}"
-    echo "        MODEL_NAMES=${model_name} SEEDS=${seed} METHODS=${methods} OUTPUT_ROOT=${output_root}"
+    echo "        TASKS=${task_chunk} MODEL_NAMES=${model_name} SEEDS=${seed} METHODS=${methods} OUTPUT_ROOT=${output_root}"
     return 0
   fi
 
   local job_id
   job_id="$(
-    TASKS="${TASKS}" \
+    TASKS="${task_chunk}" \
     MODEL_NAMES="${model_name}" \
     SEEDS="${seed}" \
     OUTPUT_ROOT="${output_root}" \
@@ -127,14 +179,16 @@ submit_job() {
 
 for model_name in "${model_names[@]}"; do
   for seed in "${seeds[@]}"; do
-    if [ "${SUBMIT_HEAD_ONLY}" = "1" ]; then
-      submit_job "head" "head_only" "${model_name}" "${seed}"
-    fi
-    if [ "${SUBMIT_FULL_FT}" = "1" ]; then
-      submit_job "fullft" "full_ft" "${model_name}" "${seed}"
-    fi
-    if [ "${SUBMIT_ADAPTERS}" = "1" ]; then
-      submit_job "adapters" "vanilla_lora,bd_lora,group_local_equal,group_local_param" "${model_name}" "${seed}"
-    fi
+    for task_chunk in "${task_chunks[@]}"; do
+      if [ "${SUBMIT_HEAD_ONLY}" = "1" ]; then
+        submit_job "${task_chunk}" "head" "head_only" "${model_name}" "${seed}"
+      fi
+      if [ "${SUBMIT_FULL_FT}" = "1" ]; then
+        submit_job "${task_chunk}" "fullft" "full_ft" "${model_name}" "${seed}"
+      fi
+      if [ "${SUBMIT_ADAPTERS}" = "1" ]; then
+        submit_job "${task_chunk}" "adapters" "vanilla_lora,bd_lora,group_local_equal,group_local_param" "${model_name}" "${seed}"
+      fi
+    done
   done
 done
